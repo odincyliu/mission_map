@@ -1,0 +1,362 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>貓咪闖關地圖｜小四・每日一關</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;700;900&display=swap" rel="stylesheet">
+  <style>
+    :root{
+      --bg:#fffdf7; --ink:#222; --soft:#f7efe3; --accent:#ffb703; --accent2:#8ecae6; --success:#76c893;
+    }
+    body{font-family:'Noto Sans TC', system-ui, -apple-system, Segoe UI, Roboto, 'Helvetica Neue', Arial; background:var(--bg); color:var(--ink);}  
+    .app-title{font-weight:900; letter-spacing:1px}
+    .cat-badge{font-size:1.25rem;}
+    .card{border:none; border-radius:1rem; box-shadow:0 8px 24px rgba(0,0,0,.08);} 
+    .map-wrap{background:linear-gradient(180deg, #fffaf0, #fff); border-radius:1rem; position:relative; padding:1.25rem}
+    .checkpoint{width:72px; height:72px; border-radius:50%; background:#fff; border:3px dashed #e7d8c7; display:flex; align-items:center; justify-content:center; position:relative; transition:transform .2s;}
+    .checkpoint .day{position:absolute; top:-1.25rem; font-weight:700; font-size:.9rem}
+    .checkpoint .cat{font-size:2rem; line-height:1}
+    .checkpoint.today{border-style:solid; border-color:var(--accent); box-shadow:0 0 0 8px rgba(255,183,3,.15);}
+    .checkpoint.done{background:var(--success); border-color:var(--success); color:#fff}
+    .checkpoint.done .cat{filter:grayscale(0)}
+    .checkpoint:hover{transform:translateY(-2px)}
+    .path{position:absolute; left:0; top:0; right:0; bottom:0; pointer-events:none}
+    .paw{font-size:1.2rem; opacity:.28}
+    .sticker{width:64px; height:64px; background:#fff; border:2px dashed #e7d8c7; border-radius:.75rem; display:flex; align-items:center; justify-content:center}
+    .sticker.filled{border-color:var(--accent2); background:linear-gradient(180deg,#fff,#eef8ff)}
+    .sticker .bigcat{font-size:1.8rem}
+    .rule-list li{margin-bottom:.25rem}
+    .task-check input[type="checkbox"]{transform:scale(1.2); margin-right:.4rem}
+    .btn-cat{background:var(--accent); color:#000; border:none; font-weight:700}
+    .btn-cat:disabled{background:#e8dcc6;color:#8b8b8b}
+
+    @media print{
+      .no-print{display:none !important}
+      .container{max-width:100%}
+      body{background:#fff}
+      .card{box-shadow:none; border:1px solid #eee}
+    }
+  </style>
+</head>
+<body>
+  <div class="container py-4">
+    <div class="d-flex align-items-center justify-content-between mb-3">
+      <h1 class="app-title">🐾 貓咪闖關地圖 <span class="fs-5 text-muted">｜小四・每日一關</span></h1>
+      <div class="no-print">
+        <button id="btnPrint" class="btn btn-outline-secondary me-2">🖨️ 列印</button>
+        <button id="btnExport" class="btn btn-outline-primary me-2">📤 匯出進度</button>
+        <label class="btn btn-outline-success mb-0">
+          📥 匯入進度 <input type="file" id="importFile" hidden accept="application/json" />
+        </label>
+      </div>
+    </div>
+
+    <div class="row g-4">
+      <!-- 今日任務 -->
+      <div class="col-lg-5">
+        <div class="card p-3">
+          <div class="d-flex align-items-center mb-2">
+            <span class="cat-badge me-2">😺</span>
+            <h5 class="mb-0">今日任務（完成 3 項即可闖關）</h5>
+          </div>
+          <div id="todayInfo" class="text-muted mb-3 small"></div>
+
+          <div class="task-check form-check mb-2">
+            <input class="form-check-input" type="checkbox" id="t_hw">
+            <label class="form-check-label" for="t_hw">作業</label>
+          </div>
+          <div class="task-check form-check mb-2">
+            <input class="form-check-input" type="checkbox" id="t_review">
+            <label class="form-check-label" for="t_review">複習</label>
+          </div>
+          <div class="task-check form-check mb-3">
+            <input class="form-check-input" type="checkbox" id="t_bag">
+            <label class="form-check-label" for="t_bag">整理書包</label>
+          </div>
+
+          <div class="d-flex gap-2">
+            <button id="btnPass" class="btn btn-cat" disabled>🎯 闖關！</button>
+            <button id="btnResetToday" class="btn btn-outline-danger">↺ 重置今日</button>
+          </div>
+          <div id="msg" class="mt-3"></div>
+
+          <hr>
+          <ul class="rule-list small mb-0">
+            <li>每天只有 <b>1 關</b>，完成三項任務即可點擊「闖關」。</li>
+            <li>闖關成功會在地圖上蓋章，並獲得隨機小貓貼紙。</li>
+            <li>每週一自動開啟新地圖（保留上週記錄，可匯出備份）。</li>
+          </ul>
+        </div>
+      </div>
+
+      <!-- 地圖區 -->
+      <div class="col-lg-7">
+        <div class="card p-3">
+          <div class="d-flex align-items-center mb-2">
+            <span class="cat-badge me-2">🐾</span>
+            <h5 class="mb-0">本週闖關地圖</h5>
+          </div>
+          <div id="weekInfo" class="text-muted small mb-3"></div>
+
+          <div class="map-wrap position-relative">
+            <div class="row row-cols-2 row-cols-sm-4 row-cols-md-7 g-3" id="mapRow"></div>
+          </div>
+
+          <div class="mt-4">
+            <div class="d-flex align-items-center mb-2">
+              <span class="cat-badge me-2">🎁</span>
+              <h6 class="mb-0">本週貼紙收藏</h6>
+            </div>
+            <div class="row g-2" id="stickerRow"></div>
+          </div>
+
+          <div class="mt-3 d-flex gap-2 no-print">
+            <button id="btnNewWeek" class="btn btn-outline-secondary">🆕 開新地圖（本週重置）</button>
+            <button id="btnClearAll" class="btn btn-outline-danger">🗑️ 清除所有資料</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <footer class="text-center text-muted small mt-4">
+      由家長與孩子一起使用：完成任務 → 點擊「闖關！」→ 收集小貓貼紙。
+    </footer>
+  </div>
+
+  <script>
+    // === 工具 ===
+    const catSet = ["🐱","🐈","😸","😺","😻","😽","🙀","😼","😹","🐾"]; // 隨機貼紙
+
+    // 取得當地時間（以使用者瀏覽器為準）
+    function todayYMD(){
+      const d = new Date();
+      const y = d.getFullYear();
+      const m = String(d.getMonth()+1).padStart(2,'0');
+      const day = String(d.getDate()).padStart(2,'0');
+      return `${y}-${m}-${day}`;
+    }
+    function weekStart(d){ // 以週一為一週起始
+      const x = new Date(d);
+      const day = x.getDay(); // 0(日)-6(六)
+      const diff = (day===0? -6 : 1) - day; // 轉到週一
+      x.setDate(x.getDate()+diff);
+      x.setHours(0,0,0,0);
+      return x;
+    }
+    function fmtDate(d){
+      return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+    }
+
+    // LocalStorage Key 以週一日期命名
+    function storageKey(prefix){
+      const ws = weekStart(new Date());
+      return `${prefix}:${fmtDate(ws)}`;
+    }
+
+    function loadJSON(key, fallback){
+      try{ return JSON.parse(localStorage.getItem(key)) ?? fallback; }catch(e){ return fallback; }
+    }
+    function saveJSON(key, obj){
+      localStorage.setItem(key, JSON.stringify(obj));
+    }
+
+    // === 狀態 ===
+    const WEEK_DAYS = ["週一","週二","週三","週四","週五","週六","週日"];
+
+    const state = {
+      weekKey: storageKey('catmap'),
+      weekData: null,
+      today: todayYMD(),
+    };
+
+    function initWeek(){
+      const ws = weekStart(new Date());
+      const we = new Date(ws); we.setDate(we.getDate()+6);
+      const weekTitle = `${fmtDate(ws)} ~ ${fmtDate(we)}`;
+      document.getElementById('weekInfo').textContent = `本週：${weekTitle}`;
+
+      const key = state.weekKey;
+      const defaultData = {
+        weekStart: fmtDate(ws),
+        days: Array.from({length:7}, (_,i)=>({
+          date: fmtDate(new Date(ws.getFullYear(), ws.getMonth(), ws.getDate()+i)),
+          tasks: {hw:false, review:false, bag:false},
+          passed: false,
+          sticker: ''
+        }))
+      };
+      state.weekData = loadJSON(key, defaultData);
+      // 若跨週，自動新建
+      if(state.weekData.weekStart !== fmtDate(ws)){
+        state.weekData = defaultData;
+        saveJSON(key, state.weekData);
+      }
+      render();
+      restoreTodayChecks();
+    }
+
+    function dayIndexByDate(dateStr){
+      return state.weekData.days.findIndex(d=>d.date===dateStr);
+    }
+
+    function render(){
+      const mapRow = document.getElementById('mapRow');
+      mapRow.innerHTML = '';
+      const stickerRow = document.getElementById('stickerRow');
+      stickerRow.innerHTML = '';
+
+      const todayStr = state.today;
+      const todayIdx = dayIndexByDate(todayStr);
+
+      state.weekData.days.forEach((d, i)=>{
+        const isToday = i===todayIdx;
+        const isDone = !!d.passed;
+        const col = document.createElement('div');
+        const cp = document.createElement('div');
+        cp.className = 'checkpoint d-flex flex-column text-center mx-auto ' + (isToday? 'today ':'') + (isDone? 'done ':'');
+        cp.innerHTML = `<div class="day">${WEEK_DAYS[i]}</div><div class="cat">${isDone ? '🏅' : '🐾'}</div>`;
+        col.appendChild(cp);
+        mapRow.appendChild(col);
+
+        const sCol = document.createElement('div'); sCol.className='col-3 col-md-2 col-lg-1';
+        const sticker = document.createElement('div');
+        sticker.className = 'sticker ' + (d.sticker? 'filled':'');
+        sticker.title = d.date;
+        sticker.innerHTML = `<span class="bigcat">${d.sticker || '🔲'}</span>`;
+        sCol.appendChild(sticker); stickerRow.appendChild(sCol);
+      });
+
+      const dNow = new Date();
+      const info = document.getElementById('todayInfo');
+      info.textContent = `今天：${fmtDate(dNow)}（${['日','一','二','三','四','五','六'][dNow.getDay()]}）`;
+
+      syncPassButton();
+    }
+
+    function syncPassButton(){
+      const idx = dayIndexByDate(state.today);
+      const day = state.weekData.days[idx];
+      const allDone = day.tasks.hw && day.tasks.review && day.tasks.bag;
+      const canPass = allDone && !day.passed;
+      document.getElementById('btnPass').disabled = !canPass;
+    }
+
+    function restoreTodayChecks(){
+      const idx = dayIndexByDate(state.today);
+      const day = state.weekData.days[idx];
+      if(!day) return;
+      document.getElementById('t_hw').checked = !!day.tasks.hw;
+      document.getElementById('t_review').checked = !!day.tasks.review;
+      document.getElementById('t_bag').checked = !!day.tasks.bag;
+      syncPassButton();
+    }
+
+    function updateTask(taskKey, val){
+      const idx = dayIndexByDate(state.today);
+      const day = state.weekData.days[idx];
+      day.tasks[taskKey] = !!val;
+      saveJSON(state.weekKey, state.weekData);
+      syncPassButton();
+    }
+
+    function passLevel(){
+      const idx = dayIndexByDate(state.today);
+      const day = state.weekData.days[idx];
+      if(day.passed) return;
+      day.passed = true;
+      const sticker = catSet[Math.floor(Math.random()*catSet.length)];
+      day.sticker = sticker;
+      saveJSON(state.weekKey, state.weekData);
+      render();
+      toastMsg(`闖關成功！得到貼紙 ${sticker} `, 'success');
+    }
+
+    function resetToday(){
+      const idx = dayIndexByDate(state.today);
+      const day = state.weekData.days[idx];
+      day.tasks = {hw:false, review:false, bag:false};
+      day.passed = false; day.sticker='';
+      saveJSON(state.weekKey, state.weekData);
+      restoreTodayChecks();
+      render();
+      toastMsg('已重置今日進度。', 'info');
+    }
+
+    function newWeek(){
+      if(!confirm('確定要重置本週地圖？此動作不可復原。')) return;
+      const ws = weekStart(new Date());
+      state.weekData = {
+        weekStart: fmtDate(ws),
+        days: Array.from({length:7}, (_,i)=>({
+          date: fmtDate(new Date(ws.getFullYear(), ws.getMonth(), ws.getDate()+i)),
+          tasks: {hw:false, review:false, bag:false},
+          passed:false, sticker:''
+        }))
+      };
+      saveJSON(state.weekKey, state.weekData);
+      render();
+      restoreTodayChecks();
+      toastMsg('已建立新地圖。', 'info');
+    }
+
+    function clearAll(){
+      if(!confirm('清除所有儲存資料？（包含歷史週）')) return;
+      Object.keys(localStorage).forEach(k=>{ if(k.startsWith('catmap:')) localStorage.removeItem(k); });
+      initWeek();
+      toastMsg('資料已全部清除。', 'info');
+    }
+
+    function toastMsg(text, type='info'){
+      const msg = document.getElementById('msg');
+      const cls = type==='success'? 'alert-success' : (type==='info'? 'alert-secondary' : 'alert-warning');
+      msg.innerHTML = `<div class="alert ${cls} py-2 px-3 mb-0">${text}</div>`;
+      setTimeout(()=>{ msg.innerHTML=''; }, 2800);
+    }
+
+    function exportData(){
+      const blob = new Blob([JSON.stringify(state.weekData, null, 2)], {type:'application/json'});
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `catmap-${state.weekData.weekStart}.json`;
+      document.body.appendChild(a); a.click(); a.remove();
+    }
+
+    function importData(file){
+      const reader = new FileReader();
+      reader.onload = (e)=>{
+        try{
+          const obj = JSON.parse(e.target.result);
+          if(!obj || !obj.weekStart || !Array.isArray(obj.days) || obj.days.length!==7){
+            alert('格式不正確'); return;
+          }
+          state.weekData = obj; saveJSON(state.weekKey, state.weekData);
+          render(); restoreTodayChecks();
+          toastMsg('匯入完成。', 'success');
+        }catch(err){ alert('無法解析檔案'); }
+      };
+      reader.readAsText(file);
+    }
+
+    // === 綁定 ===
+    window.addEventListener('DOMContentLoaded', ()=>{
+      initWeek();
+      document.getElementById('t_hw').addEventListener('change', e=>updateTask('hw', e.target.checked));
+      document.getElementById('t_review').addEventListener('change', e=>updateTask('review', e.target.checked));
+      document.getElementById('t_bag').addEventListener('change', e=>updateTask('bag', e.target.checked));
+      document.getElementById('btnPass').addEventListener('click', passLevel);
+      document.getElementById('btnResetToday').addEventListener('click', resetToday);
+      document.getElementById('btnNewWeek').addEventListener('click', newWeek);
+      document.getElementById('btnClearAll').addEventListener('click', clearAll);
+      document.getElementById('btnPrint').addEventListener('click', ()=>window.print());
+      document.getElementById('btnExport').addEventListener('click', exportData);
+      document.getElementById('importFile').addEventListener('change', (e)=>{
+        if(e.target.files && e.target.files[0]) importData(e.target.files[0]);
+      });
+    });
+  </script>
+</body>
+</html>
