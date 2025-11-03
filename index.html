@@ -33,6 +33,8 @@
     .task-check input[type="checkbox"]{transform:scale(1.2); margin-right:.4rem}
     .btn-cat{background:var(--accent); color:#000; border:none; font-weight:700}
     .btn-cat:disabled{background:#e8dcc6;color:#8b8b8b}
+    .reward-panel{background:var(--soft); border-radius:.75rem; padding:.75rem; border:1px solid rgba(0,0,0,.05); min-height:100%; display:flex; flex-direction:column; gap:.35rem}
+    .reward-list{margin:0; padding-left:1.25rem}
 
     @media print{
       .no-print{display:none !important}
@@ -68,7 +70,7 @@
           <div id="taskList" class="mb-2"></div>
           <div id="taskCounter" class="small text-muted mb-3"></div>
 
-          <div class="input-group input-group-sm mb-3">
+          <div class="input-group input-group-sm mb-2">
             <label class="input-group-text" for="taskCategory">新增任務</label>
             <select id="taskCategory" class="form-select">
               <option value="作業">作業</option>
@@ -80,6 +82,16 @@
             <input id="taskDetail" type="text" class="form-control" placeholder="輸入詳細內容，例如：國習3" />
             <button id="btnAddTask" class="btn btn-outline-secondary">➕</button>
           </div>
+          <div class="input-group input-group-sm mb-1">
+            <label class="input-group-text" for="rewardType">獎勵</label>
+            <select id="rewardType" class="form-select">
+              <option value="points">點數</option>
+              <option value="custom">自訂</option>
+            </select>
+            <input id="rewardPoints" type="number" class="form-control" min="0" value="10" placeholder="輸入點數" />
+            <input id="rewardCustom" type="text" class="form-control d-none" placeholder="輸入獎勵內容，例如：玩 10 分鐘 Switch" />
+          </div>
+          <div class="form-text small text-muted mb-3">可選擇點數或輸入其他獎勵內容。</div>
 
           <div class="form-check form-switch mb-1">
             <input class="form-check-input" type="checkbox" role="switch" id="chkParentPass">
@@ -120,6 +132,21 @@
               <h6 class="mb-0">本週貼紙收藏</h6>
             </div>
             <div class="row g-2" id="stickerRow"></div>
+          </div>
+
+          <div class="mt-4">
+            <div class="d-flex align-items-center mb-2">
+              <span class="cat-badge me-2">💎</span>
+              <h6 class="mb-0">獎勵紀錄</h6>
+            </div>
+            <div class="row g-2 small" id="rewardSummary">
+              <div class="col-12 col-md-6">
+                <div class="reward-panel h-100" id="rewardToday"></div>
+              </div>
+              <div class="col-12 col-md-6">
+                <div class="reward-panel h-100" id="rewardWeek"></div>
+              </div>
+            </div>
           </div>
 
           <div class="mt-3 d-flex gap-2 no-print">
@@ -188,12 +215,111 @@
       return 't' + Math.random().toString(36).slice(2,9);
     }
 
+    function defaultReward(){
+      return {type:'points', value:10};
+    }
+
     function defaultTasks(){
       return [
-        {id:uid(), category:'作業', detail:'', done:false},
-        {id:uid(), category:'複習', detail:'', done:false},
-        {id:uid(), category:'整理書包', detail:'', done:false}
+        {id:uid(), category:'作業', detail:'', done:false, reward:defaultReward()},
+        {id:uid(), category:'複習', detail:'', done:false, reward:defaultReward()},
+        {id:uid(), category:'整理書包', detail:'', done:false, reward:defaultReward()}
       ];
+    }
+
+    function ensureTaskReward(task){
+      if(!task.reward || typeof task.reward !== 'object'){
+        task.reward = defaultReward();
+      }
+      const r = task.reward;
+      if(r.type === 'custom'){
+        task.reward = {type:'custom', value: String(r.value ?? '').trim()};
+      }else if(r.type === 'points'){
+        const num = Number(r.value);
+        const safe = Number.isFinite(num) ? Math.max(0, Math.round(num)) : 0;
+        task.reward = {type:'points', value: safe};
+      }else{
+        const fallback = Number(r.value);
+        const safe = Number.isFinite(fallback) ? Math.max(0, Math.round(fallback)) : 0;
+        task.reward = {type:'points', value: safe};
+      }
+      return task.reward;
+    }
+
+    function getTaskRewardLabel(task){
+      const reward = ensureTaskReward(task);
+      if(reward.type === 'custom'){
+        return reward.value || '未設定';
+      }
+      return `${reward.value || 0} 點`;
+    }
+
+    function collectRewardsFromDay(day){
+      const summary = {points:0, custom:[], doneCount:0};
+      if(!day || !Array.isArray(day.tasks)) return summary;
+      day.tasks.forEach(task=>{
+        ensureTaskReward(task);
+        if(!task.done) return;
+        summary.doneCount += 1;
+        if(task.reward.type === 'points'){
+          summary.points += Number(task.reward.value) || 0;
+        }else if(task.reward.type === 'custom'){
+          const text = (task.reward.value || '').trim();
+          if(text){ summary.custom.push(text); }
+        }
+      });
+      return summary;
+    }
+
+    function updateRewardSummary(){
+      const todayBox = document.getElementById('rewardToday');
+      const weekBox = document.getElementById('rewardWeek');
+      if(!todayBox || !weekBox || !state.weekData || !Array.isArray(state.weekData.days)) return;
+      const idx = dayIndexByDate(state.today);
+      const day = state.weekData.days[idx];
+      if(day){ ensureDayStructure(day); }
+
+      const todaySummary = collectRewardsFromDay(day);
+      const todayParts = ['<div class="fw-bold mb-1">今日獎勵</div>'];
+      if(!todaySummary.doneCount){
+        todayParts.push('<div class="text-muted">尚未完成任務。</div>');
+      }else{
+        todayParts.push(`<div class="mb-1">點數：<strong>${todaySummary.points}</strong> 點</div>`);
+        if(todaySummary.custom.length){
+          todayParts.push('<div>其他獎勵：</div>');
+          todayParts.push(`<ul class="reward-list mb-0">${todaySummary.custom.map(item=>`<li>${item}</li>`).join('')}</ul>`);
+        }else{
+          todayParts.push('<div class="text-muted">無其他獎勵記錄。</div>');
+        }
+      }
+      todayBox.innerHTML = todayParts.join('');
+
+      let weekPoints = 0;
+      const weekCustom = [];
+      let weekHasAny = false;
+      state.weekData.days.forEach((d, i)=>{
+        ensureDayStructure(d);
+        const summary = collectRewardsFromDay(d);
+        if(summary.doneCount){ weekHasAny = true; }
+        weekPoints += summary.points;
+        if(summary.custom.length){
+          summary.custom.forEach(text=>weekCustom.push(`${WEEK_DAYS[i]}：${text}`));
+        }
+      });
+
+      const weekParts = ['<div class="fw-bold mb-1">本週累積</div>'];
+      if(!weekHasAny && weekPoints === 0 && weekCustom.length === 0){
+        weekParts.push('<div class="text-muted">尚未累積獎勵。</div>');
+      }else{
+        weekParts.push(`<div class="mb-1">點數：<strong>${weekPoints}</strong> 點</div>`);
+        if(weekCustom.length){
+          weekParts.push('<div>其他獎勵：</div>');
+          weekParts.push(`<ul class="reward-list mb-0">${weekCustom.map(item=>`<li>${item}</li>`).join('')}</ul>`);
+        }else{
+          weekParts.push('<div class="text-muted">無其他獎勵記錄。</div>');
+        }
+      }
+      weekBox.innerHTML = weekParts.join('');
     }
 
     function ensureDayStructure(day){
@@ -203,18 +329,19 @@
         const obj = day.tasks;
         const arr = [];
         if(Object.prototype.hasOwnProperty.call(obj, 'hw')){
-          arr.push({id:uid(), category:'作業', detail:'', done:!!obj.hw});
+          arr.push({id:uid(), category:'作業', detail:'', done:!!obj.hw, reward:defaultReward()});
         }
         if(Object.prototype.hasOwnProperty.call(obj, 'review')){
-          arr.push({id:uid(), category:'複習', detail:'', done:!!obj.review});
+          arr.push({id:uid(), category:'複習', detail:'', done:!!obj.review, reward:defaultReward()});
         }
         if(Object.prototype.hasOwnProperty.call(obj, 'bag')){
-          arr.push({id:uid(), category:'整理書包', detail:'', done:!!obj.bag});
+          arr.push({id:uid(), category:'整理書包', detail:'', done:!!obj.bag, reward:defaultReward()});
         }
         day.tasks = arr.length ? arr : defaultTasks();
       }
       if(typeof day.passed !== 'boolean'){ day.passed = !!day.passed; }
       if(typeof day.sticker !== 'string'){ day.sticker = day.sticker ? String(day.sticker) : ''; }
+      day.tasks.forEach(ensureTaskReward);
     }
 
     function initWeek(){
@@ -286,13 +413,17 @@
       container.innerHTML = '';
       const idx = dayIndexByDate(state.today);
       const day = state.weekData.days[idx];
-      if(!day){ return; }
+      if(!day){
+        updateRewardSummary();
+        return;
+      }
       ensureDayStructure(day);
       const totalCount = day.tasks.length;
       let doneCount = 0;
       day.tasks.forEach(task=>{
+        ensureTaskReward(task);
         const wrapper = document.createElement('div');
-        wrapper.className = 'task-check form-check d-flex align-items-center justify-content-between gap-2 mb-2';
+        wrapper.className = 'task-check form-check d-flex align-items-start justify-content-between gap-3 mb-2 flex-wrap';
 
         const left = document.createElement('div');
         left.className = 'd-flex align-items-center flex-grow-1';
@@ -313,14 +444,25 @@
         left.appendChild(checkbox);
         left.appendChild(label);
 
+        const right = document.createElement('div');
+        right.className = 'd-flex flex-column align-items-end gap-1';
+
+        const rewardBadge = document.createElement('span');
+        rewardBadge.className = 'badge text-bg-warning text-dark';
+        rewardBadge.textContent = `🎁 ${getTaskRewardLabel(task)}`;
+        rewardBadge.title = '完成此任務可獲得的獎勵';
+
         const removeBtn = document.createElement('button');
         removeBtn.className = 'btn btn-sm btn-outline-danger';
         removeBtn.type = 'button';
         removeBtn.dataset.removeTaskId = task.id;
         removeBtn.textContent = '刪除';
 
+        right.appendChild(rewardBadge);
+        right.appendChild(removeBtn);
+
         wrapper.appendChild(left);
-        wrapper.appendChild(removeBtn);
+        wrapper.appendChild(right);
         container.appendChild(wrapper);
       });
 
@@ -338,6 +480,8 @@
       if(note){
         note.textContent = lock ? '需完成至少 3 項任務後才能勾選闖關成功。' : '家長可勾選今日闖關成功，蓋章並取得貼紙。';
       }
+
+      updateRewardSummary();
     }
 
     function toggleTask(taskId, value){
@@ -350,12 +494,13 @@
       renderTodayTasks();
     }
 
-    function addTask(category, detail){
+    function addTask(category, detail, reward){
       const idx = dayIndexByDate(state.today);
       const day = state.weekData.days[idx];
       ensureDayStructure(day);
       const trimmedDetail = detail.trim();
-      const task = { id: uid(), category, detail: trimmedDetail, done: false };
+      const task = { id: uid(), category, detail: trimmedDetail, done: false, reward: reward || defaultReward() };
+      ensureTaskReward(task);
       day.tasks.push(task);
       saveJSON(state.weekKey, state.weekData);
       renderTodayTasks();
@@ -477,10 +622,24 @@
         const category = document.getElementById('taskCategory').value;
         const detailInput = document.getElementById('taskDetail');
         const detail = detailInput.value;
+        const rewardType = document.getElementById('rewardType').value;
+        const rewardPoints = document.getElementById('rewardPoints');
+        const rewardCustom = document.getElementById('rewardCustom');
         if(!category && !detail.trim()) return;
-        addTask(category || '其他', detail);
+        let reward;
+        if(rewardType === 'custom'){
+          reward = {type:'custom', value:(rewardCustom.value || '').trim()};
+        }else{
+          const num = Number(rewardPoints.value);
+          const safe = Number.isFinite(num) ? Math.max(0, Math.round(num)) : 0;
+          reward = {type:'points', value:safe};
+        }
+        addTask(category || '其他', detail, reward);
         detailInput.value = '';
         detailInput.focus();
+        if(rewardType === 'custom'){
+          rewardCustom.value = '';
+        }
       });
       document.getElementById('taskDetail').addEventListener('keydown', (e)=>{
         if(e.key==='Enter'){
@@ -488,6 +647,21 @@
           document.getElementById('btnAddTask').click();
         }
       });
+      const rewardTypeSelect = document.getElementById('rewardType');
+      const rewardPointsInput = document.getElementById('rewardPoints');
+      const rewardCustomInput = document.getElementById('rewardCustom');
+      function syncRewardInputs(){
+        if(rewardTypeSelect.value === 'custom'){
+          rewardPointsInput.classList.add('d-none');
+          rewardCustomInput.classList.remove('d-none');
+          rewardCustomInput.focus();
+        }else{
+          rewardPointsInput.classList.remove('d-none');
+          rewardCustomInput.classList.add('d-none');
+        }
+      }
+      rewardTypeSelect.addEventListener('change', syncRewardInputs);
+      syncRewardInputs();
       document.getElementById('chkParentPass').addEventListener('change', (e)=>setParentPass(e.target.checked));
       document.getElementById('btnResetToday').addEventListener('click', resetToday);
       document.getElementById('btnNewWeek').addEventListener('click', newWeek);
