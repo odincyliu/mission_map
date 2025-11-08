@@ -169,6 +169,42 @@
       return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
     }
 
+    function normalizeApiDate(raw){
+      if(raw instanceof Date && !Number.isNaN(raw.getTime())){
+        return fmtDate(raw);
+      }
+      if(typeof raw === 'number' && Number.isFinite(raw)){
+        const d = new Date(raw);
+        if(!Number.isNaN(d.getTime())){
+          return fmtDate(d);
+        }
+      }
+      if(typeof raw === 'string'){
+        const trimmed = raw.trim();
+        if(!trimmed){ return ''; }
+        const parsed = Date.parse(trimmed.replace(/[年]/g, '/').replace(/[月]/g, '/').replace(/[日]/g, ''));
+        if(!Number.isNaN(parsed)){
+          const d = new Date(parsed);
+          if(!Number.isNaN(d.getTime())){
+            return fmtDate(d);
+          }
+        }
+        const match = trimmed.match(/^(\d{4})[\/-年](\d{1,2})[\/-月](\d{1,2})/);
+        if(match){
+          const y = Number(match[1]);
+          const m = Number(match[2]);
+          const day = Number(match[3]);
+          if(Number.isFinite(y) && Number.isFinite(m) && Number.isFinite(day)){
+            const d = new Date(y, m-1, day);
+            if(!Number.isNaN(d.getTime())){
+              return fmtDate(d);
+            }
+          }
+        }
+      }
+      return '';
+    }
+
     // LocalStorage Key 以週一日期命名
     function storageKey(prefix){
       const ws = weekStart(new Date());
@@ -229,11 +265,7 @@
     }
 
     function defaultTasks(){
-      return [
-        markTaskSource({id:uid(), category:'作業', detail:'', done:false, reward:defaultReward()}, 'local'),
-        markTaskSource({id:uid(), category:'複習', detail:'', done:false, reward:defaultReward()}, 'local'),
-        markTaskSource({id:uid(), category:'整理書包', detail:'', done:false, reward:defaultReward()}, 'local')
-      ];
+      return [];
     }
 
     function generateApiId(){
@@ -304,45 +336,48 @@
 
     function parseTaskFromApi(record){
       if(!record) return null;
+      const rawId = record.id ?? record.ID ?? record.Id;
       const task = {
-        id: String(record.id ?? generateApiId()),
+        id: String(rawId ?? generateApiId()),
         category: '其他',
         detail: '',
         done: false,
         reward: defaultReward(),
         source: 'api'
       };
-      if(record.item){
-        if(typeof record.item === 'string'){
+      const rawItem = record.item ?? record.Item ?? record['項目'];
+      if(rawItem){
+        if(typeof rawItem === 'string'){
           try{
-            const obj = JSON.parse(record.item);
+            const obj = JSON.parse(rawItem);
             if(obj && typeof obj === 'object'){
               if(obj.category){ task.category = String(obj.category); }
               if(obj.detail){ task.detail = String(obj.detail); }
             }else{
-              const parts = record.item.split('｜');
+              const parts = rawItem.split('｜');
               if(parts.length > 1){
                 task.category = parts[0] || task.category;
                 task.detail = parts.slice(1).join('｜');
               }else{
-                task.detail = record.item;
+                task.detail = rawItem;
               }
             }
           }catch(e){
-            const parts = record.item.split('｜');
+            const parts = rawItem.split('｜');
             if(parts.length > 1){
               task.category = parts[0] || task.category;
               task.detail = parts.slice(1).join('｜');
             }else{
-              task.detail = record.item;
+              task.detail = rawItem;
             }
           }
-        }else if(typeof record.item === 'object'){
-          if(record.item.category){ task.category = String(record.item.category); }
-          if(record.item.detail){ task.detail = String(record.item.detail); }
+        }else if(typeof rawItem === 'object'){
+          if(rawItem.category){ task.category = String(rawItem.category); }
+          if(rawItem.detail){ task.detail = String(rawItem.detail); }
         }
       }
-      task.reward = rewardFromApi(record.reward);
+      const rawReward = record.reward ?? record.Reward ?? record['獎勵'];
+      task.reward = rewardFromApi(rawReward);
       ensureTaskReward(task);
       const doneKeys = ['done','Done','DONE','完成 ','完成','已完成','isDone','status'];
       const hasDoneField = doneKeys.some(key=>Object.prototype.hasOwnProperty.call(record, key));
@@ -560,14 +595,15 @@
         const records = await apiFetchRange(startStr, endStr);
         const tasksByDate = new Map();
         records.forEach(rec=>{
-          const dateStr = rec.date ? String(rec.date).trim() : '';
-          if(!dateStr) return;
+          const rawDate = rec.date ?? rec.Date ?? rec['日期'] ?? rec['日期 '] ?? rec['date'] ?? rec.timestamp ?? rec.Timestamp;
+          const normalizedDate = normalizeApiDate(rawDate);
+          if(!normalizedDate) return;
           const task = parseTaskFromApi(rec);
           if(!task) return;
-          if(!tasksByDate.has(dateStr)){
-            tasksByDate.set(dateStr, []);
+          if(!tasksByDate.has(normalizedDate)){
+            tasksByDate.set(normalizedDate, []);
           }
-          tasksByDate.get(dateStr).push(task);
+          tasksByDate.get(normalizedDate).push(task);
         });
 
         state.weekData.days.forEach(day=>{
@@ -586,7 +622,7 @@
             });
             day.tasks = incoming;
           }else{
-            // 移除舊的 API 任務，保留本地預設任務
+            // 移除舊的 API 任務，保留其他來源的內容
             day.tasks = day.tasks.filter(t=>t.source !== 'api');
             if(!day.tasks.length){
               day.tasks = defaultTasks();
@@ -720,6 +756,9 @@
       const status = refreshDayStatus(day, {silent:true});
       const totalCount = status.total;
       const doneCount = status.doneCount;
+      if(!day.tasks.length){
+        container.innerHTML = '<div class="text-muted">尚未加入任務。</div>';
+      }
       day.tasks.forEach(task=>{
         ensureTaskReward(task);
         const wrapper = document.createElement('div');
