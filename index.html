@@ -226,6 +226,8 @@
       weekData: null,
       today: todayYMD(),
       selectedDate: null,
+      loadingDate: null,
+      isLoadingDay: false,
     };
 
     function uid(){
@@ -478,6 +480,7 @@
       const {day: selectedDay} = ensureSelectedDay();
       if(selectedDay){ ensureDayStructure(selectedDay); }
 
+      const isLoadingSelected = state.isLoadingDay && selectedDay && state.loadingDate === selectedDay.date;
       const selectedSummary = collectRewardsFromDay(selectedDay);
       const heading = selectedDay
         ? (selectedDay.date === state.today ? '今日獎勵' : `所選日期（${selectedDay.date}）獎勵`)
@@ -485,6 +488,8 @@
       const todayParts = [`<div class="fw-bold mb-1">${heading}</div>`];
       if(!selectedDay){
         todayParts.push('<div class="text-muted">尚未選擇任務日。</div>');
+      }else if(isLoadingSelected){
+        todayParts.push('<div class="text-muted">任務載入中…</div>');
       }else if(!selectedSummary.doneCount){
         todayParts.push('<div class="text-muted">尚未完成任務。</div>');
       }else{
@@ -644,6 +649,39 @@
       return state.weekData.days.findIndex(d=>d.date===dateStr);
     }
 
+    function getDayByDate(dateStr){
+      if(!state.weekData || !Array.isArray(state.weekData.days)){
+        return {day:null, index:-1};
+      }
+      const idx = dayIndexByDate(dateStr);
+      if(idx < 0){
+        return {day:null, index:-1};
+      }
+      return {day: state.weekData.days[idx], index: idx};
+    }
+
+    async function fetchTasksForDate(dateStr){
+      const records = await apiFetchRange(dateStr, dateStr);
+      const tasks = [];
+      records.forEach(rec=>{
+        const task = parseTaskFromApi(rec);
+        if(!task) return;
+        ensureTaskReward(task);
+        markTaskSource(task, 'api');
+        tasks.push(task);
+      });
+      return tasks;
+    }
+
+    async function refreshDayFromApi(dateStr){
+      const {day} = getDayByDate(dateStr);
+      if(!day){ return; }
+      const tasks = await fetchTasksForDate(dateStr);
+      day.tasks = tasks;
+      refreshDayStatus(day, {silent:true});
+      saveJSON(state.weekKey, state.weekData);
+    }
+
     function ensureSelectedDay(){
       if(!state.weekData || !Array.isArray(state.weekData.days)){
         return {day:null, index:-1};
@@ -665,9 +703,23 @@
       return {day:null, index:-1};
     }
 
-    function selectDay(dateStr){
+    async function selectDay(dateStr){
       state.selectedDate = dateStr;
+      state.loadingDate = dateStr;
+      state.isLoadingDay = true;
       render();
+      try{
+        await refreshDayFromApi(dateStr);
+      }catch(err){
+        console.error(err);
+        toastMsg('讀取任務失敗，將顯示目前資料。', 'warning');
+      }finally{
+        if(state.loadingDate === dateStr){
+          state.isLoadingDay = false;
+          state.loadingDate = null;
+          render();
+        }
+      }
     }
 
     function render(){
@@ -749,12 +801,19 @@
         updateRewardSummary();
         return;
       }
+      if(state.isLoadingDay && state.loadingDate === day.date){
+        container.innerHTML = '<div class="text-muted">正在載入任務…</div>';
+        const counter = document.getElementById('taskCounter');
+        if(counter){ counter.textContent = '任務載入中…'; }
+        updateRewardSummary();
+        return;
+      }
       ensureDayStructure(day);
       const status = refreshDayStatus(day, {silent:true});
       const totalCount = status.total;
       const doneCount = status.doneCount;
       if(!day.tasks.length){
-        container.innerHTML = '<div class="text-muted">尚未加入任務。</div>';
+        container.innerHTML = '<div class="text-muted">目前沒有任務。</div>';
       }
       day.tasks.forEach(task=>{
         ensureTaskReward(task);
@@ -809,7 +868,7 @@
           : '完成任務後會自動蓋章並收集貼紙。';
         const counterMsg = totalCount
           ? `已完成 ${doneCount} / ${totalCount} 項任務。${completionMsg}`
-          : '尚未加入任務。';
+          : '目前沒有任務。';
         counter.textContent = counterMsg;
       }
 
