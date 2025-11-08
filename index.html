@@ -428,7 +428,7 @@
       if(Array.isArray(day.tasks)){
         day.tasks.forEach(task=>{ if(task && task.done){ doneCount += 1; } });
       }
-      const completed = total > 0 && doneCount > 0;
+      const completed = total > 0 && doneCount === total;
       const prev = !!day.passed;
       day.passed = completed;
       if(completed){
@@ -714,11 +714,12 @@
         console.error(err);
         toastMsg('讀取任務失敗，將顯示目前資料。', 'warning');
       }finally{
-        if(state.loadingDate === dateStr){
+        const isCurrentRequest = state.loadingDate === dateStr;
+        if(isCurrentRequest){
           state.isLoadingDay = false;
           state.loadingDate = null;
-          render();
         }
+        render();
       }
     }
 
