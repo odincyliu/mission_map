@@ -36,6 +36,10 @@
     .btn-cat:disabled{background:#e8dcc6;color:#8b8b8b}
     .reward-panel{background:var(--soft); border-radius:.75rem; padding:.75rem; border:1px solid rgba(0,0,0,.05); min-height:100%; display:flex; flex-direction:column; gap:.35rem}
     .reward-list{margin:0; padding-left:1.25rem}
+    .loading-overlay{position:fixed; inset:0; background:rgba(255,253,247,.88); display:flex; align-items:center; justify-content:center; z-index:2000; opacity:0; pointer-events:none; transition:opacity .2s ease}
+    .loading-overlay.show{opacity:1; pointer-events:auto}
+    .loading-overlay .loading-box{background:#fff; border-radius:1rem; padding:1.5rem 2rem; box-shadow:0 12px 32px rgba(0,0,0,.12); display:flex; flex-direction:column; align-items:center; gap:.75rem; min-width:220px}
+    body.loading-active{overflow:hidden}
 
     @media print{
       .no-print{display:none !important}
@@ -145,6 +149,14 @@
     </footer>
   </div>
 
+  <div id="loadingOverlay" class="loading-overlay" role="status" aria-hidden="true">
+    <div class="loading-box text-center">
+      <div class="spinner-border text-warning" role="status" aria-hidden="true"></div>
+      <div class="fw-semibold">資料處理中…</div>
+      <div class="small text-muted">請稍候，正在與雲端同步</div>
+    </div>
+  </div>
+
   <script>
     // === 工具 ===
     const catSet = ["🐱","🐈","😸","😺","😻","😽","🙀","😼","😹","🐾"]; // 隨機貼紙
@@ -229,6 +241,40 @@
       loadingDate: null,
       isLoadingDay: false,
     };
+
+    let globalLoadingCounter = 0;
+
+    function updateGlobalLoadingOverlay(){
+      const overlay = document.getElementById('loadingOverlay');
+      const isActive = globalLoadingCounter > 0;
+      if(overlay){
+        overlay.classList.toggle('show', isActive);
+        overlay.setAttribute('aria-hidden', isActive ? 'false' : 'true');
+      }
+      if(document.body){
+        document.body.classList.toggle('loading-active', isActive);
+        document.body.setAttribute('aria-busy', isActive ? 'true' : 'false');
+      }
+    }
+
+    function pushGlobalLoading(){
+      globalLoadingCounter += 1;
+      updateGlobalLoadingOverlay();
+    }
+
+    function popGlobalLoading(){
+      globalLoadingCounter = Math.max(0, globalLoadingCounter - 1);
+      updateGlobalLoadingOverlay();
+    }
+
+    async function withGlobalLoading(task){
+      pushGlobalLoading();
+      try{
+        return await (typeof task === 'function' ? task() : task);
+      }finally{
+        popGlobalLoading();
+      }
+    }
 
     function uid(){
       if(window.crypto && window.crypto.randomUUID){
@@ -596,53 +642,55 @@
       we.setDate(we.getDate()+6);
       const startStr = fmtDate(ws);
       const endStr = fmtDate(we);
-      try{
-        const records = await apiFetchRange(startStr, endStr);
-        const tasksByDate = new Map();
-        records.forEach(rec=>{
-          const rawDate = rec.date ?? rec.Date ?? rec['日期'] ?? rec['日期 '] ?? rec['date'] ?? rec.timestamp ?? rec.Timestamp;
-          const normalizedDate = normalizeApiDate(rawDate);
-          if(!normalizedDate) return;
-          const task = parseTaskFromApi(rec);
-          if(!task) return;
-          if(!tasksByDate.has(normalizedDate)){
-            tasksByDate.set(normalizedDate, []);
-          }
-          tasksByDate.get(normalizedDate).push(task);
-        });
-
-        state.weekData.days.forEach(day=>{
-          if(!day) return;
-          ensureDayStructure(day);
-          const existingMap = new Map();
-          day.tasks.forEach(t=>{ existingMap.set(String(t.id), t); });
-          const incoming = tasksByDate.get(day.date) || [];
-          if(incoming.length){
-            incoming.forEach(task=>{
-              const prev = existingMap.get(String(task.id));
-              if(prev && !task._hasRemoteDone){ task.done = !!prev.done; }
-              ensureTaskReward(task);
-              markTaskSource(task, 'api');
-              delete task._hasRemoteDone;
-            });
-            day.tasks = incoming;
-          }else{
-            // 移除舊的 API 任務，保留其他來源的內容
-            day.tasks = day.tasks.filter(t=>t.source !== 'api');
-            if(!day.tasks.length){
-              day.tasks = defaultTasks();
+      await withGlobalLoading(async ()=>{
+        try{
+          const records = await apiFetchRange(startStr, endStr);
+          const tasksByDate = new Map();
+          records.forEach(rec=>{
+            const rawDate = rec.date ?? rec.Date ?? rec['日期'] ?? rec['日期 '] ?? rec['date'] ?? rec.timestamp ?? rec.Timestamp;
+            const normalizedDate = normalizeApiDate(rawDate);
+            if(!normalizedDate) return;
+            const task = parseTaskFromApi(rec);
+            if(!task) return;
+            if(!tasksByDate.has(normalizedDate)){
+              tasksByDate.set(normalizedDate, []);
             }
-          }
-          refreshDayStatus(day, {silent:true});
-        });
-        saveJSON(state.weekKey, state.weekData);
-        ensureSelectedDay();
-        render();
-        toastMsg('已從雲端載入本週任務。', 'success');
-      }catch(err){
-        console.error(err);
-        toastMsg('雲端資料載入失敗，使用本地資料。', 'warning');
-      }
+            tasksByDate.get(normalizedDate).push(task);
+          });
+
+          state.weekData.days.forEach(day=>{
+            if(!day) return;
+            ensureDayStructure(day);
+            const existingMap = new Map();
+            day.tasks.forEach(t=>{ existingMap.set(String(t.id), t); });
+            const incoming = tasksByDate.get(day.date) || [];
+            if(incoming.length){
+              incoming.forEach(task=>{
+                const prev = existingMap.get(String(task.id));
+                if(prev && !task._hasRemoteDone){ task.done = !!prev.done; }
+                ensureTaskReward(task);
+                markTaskSource(task, 'api');
+                delete task._hasRemoteDone;
+              });
+              day.tasks = incoming;
+            }else{
+              // 移除舊的 API 任務，保留其他來源的內容
+              day.tasks = day.tasks.filter(t=>t.source !== 'api');
+              if(!day.tasks.length){
+                day.tasks = defaultTasks();
+              }
+            }
+            refreshDayStatus(day, {silent:true});
+          });
+          saveJSON(state.weekKey, state.weekData);
+          ensureSelectedDay();
+          render();
+          toastMsg('已從雲端載入本週任務。', 'success');
+        }catch(err){
+          console.error(err);
+          toastMsg('雲端資料載入失敗，使用本地資料。', 'warning');
+        }
+      });
     }
 
     function dayIndexByDate(dateStr){
@@ -709,7 +757,7 @@
       state.isLoadingDay = true;
       render();
       try{
-        await refreshDayFromApi(dateStr);
+        await withGlobalLoading(()=>refreshDayFromApi(dateStr));
       }catch(err){
         console.error(err);
         toastMsg('讀取任務失敗，將顯示目前資料。', 'warning');
@@ -876,15 +924,31 @@
       updateRewardSummary();
     }
 
-    function toggleTask(taskId, value){
+    async function toggleTask(taskId, value){
       const {day} = ensureSelectedDay();
       if(!day) return;
-      const task = day.tasks.find(t=>t.id===taskId);
+      const task = day.tasks.find(t=>String(t.id)===String(taskId));
       if(!task) return;
-      task.done = !!value;
-      refreshDayStatus(day, {silent:false});
-      saveJSON(state.weekKey, state.weekData);
-      render();
+      const desired = !!value;
+      if(task.source === 'api'){
+        try{
+          await withGlobalLoading(()=>apiUpdateRecord(String(task.id), {done: desired}));
+          task.done = desired;
+          refreshDayStatus(day, {silent:false});
+          saveJSON(state.weekKey, state.weekData);
+          render();
+        }catch(err){
+          console.error(err);
+          toastMsg(`同步任務狀態失敗：${err.message}`, 'warning');
+          render();
+          throw err;
+        }
+      }else{
+        task.done = desired;
+        refreshDayStatus(day, {silent:false});
+        saveJSON(state.weekKey, state.weekData);
+        render();
+      }
     }
 
     async function addTask(category, detail, reward){
@@ -897,7 +961,7 @@
       ensureTaskReward(task);
       const payload = encodeTaskForApi(task, day.date);
       try{
-        await apiAddRecord(payload);
+        await withGlobalLoading(()=>apiAddRecord(payload));
         day.tasks = day.tasks.filter(t=>!(t.source === 'api' && String(t.id) === String(taskId)));
         day.tasks.push(task);
         refreshDayStatus(day, {silent:true});
@@ -919,7 +983,7 @@
       if(!task){ return; }
       if(task.source === 'api'){
         try{
-          await apiDeleteRecord(String(taskId));
+          await withGlobalLoading(()=>apiDeleteRecord(String(taskId)));
         }catch(err){
           console.error(err);
           toastMsg(`刪除任務失敗：${err.message}`, 'warning');
@@ -986,6 +1050,44 @@
       return data;
     }
 
+    async function apiUpdateRecord(id, updates={}){
+      const body = new URLSearchParams();
+      body.append('action', 'update');
+      body.append('id', id);
+
+      if(Object.prototype.hasOwnProperty.call(updates, 'date') && updates.date !== undefined && updates.date !== null){
+        body.append('date', updates.date);
+      }
+      if(Object.prototype.hasOwnProperty.call(updates, 'item') && updates.item !== undefined && updates.item !== null){
+        body.append('item', updates.item);
+      }
+      if(Object.prototype.hasOwnProperty.call(updates, 'reward') && updates.reward !== undefined && updates.reward !== null){
+        body.append('reward', updates.reward);
+      }
+      if(Object.prototype.hasOwnProperty.call(updates, 'done')){
+        const doneValue = typeof updates.done === 'string' ? updates.done : formatDoneFlag(!!updates.done);
+        body.append('done', doneValue);
+        body.append('完成 ', doneValue);
+        body.append('完成', doneValue);
+      }
+
+      const resp = await fetch(API_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8'
+        },
+        body: body.toString()
+      });
+      if(!resp.ok){
+        throw new Error(`API 請求失敗 (${resp.status})`);
+      }
+      const data = await resp.json();
+      if(!data.success){
+        throw new Error(data.message || '更新失敗');
+      }
+      return data;
+    }
+
     async function apiDeleteRecord(id){
       const body = new URLSearchParams();
       body.append('action', 'delete');
@@ -1013,7 +1115,17 @@
       initWeek();
       document.getElementById('taskList').addEventListener('change', (e)=>{
         if(e.target.matches('input[type="checkbox"][data-task-id]')){
-          toggleTask(e.target.dataset.taskId, e.target.checked);
+          const checkbox = e.target;
+          const taskId = checkbox.dataset.taskId;
+          const isChecked = checkbox.checked;
+          checkbox.disabled = true;
+          toggleTask(taskId, isChecked)
+            .catch(()=>{
+              checkbox.checked = !isChecked;
+            })
+            .finally(()=>{
+              checkbox.disabled = false;
+            });
         }
       });
       document.getElementById('taskList').addEventListener('click', (e)=>{
