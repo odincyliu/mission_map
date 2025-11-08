@@ -63,7 +63,7 @@
         <div class="card p-3">
           <div class="d-flex align-items-center mb-2">
             <span class="cat-badge me-2">😺</span>
-            <h5 class="mb-0">今日任務（完成 3 項即可請家長勾選）</h5>
+            <h5 class="mb-0">今日任務</h5>
           </div>
           <div id="todayInfo" class="text-muted mb-3 small"></div>
 
@@ -92,12 +92,7 @@
             <input id="rewardCustom" type="text" class="form-control d-none" placeholder="輸入獎勵內容，例如：玩 10 分鐘 Switch" />
           </div>
           <div class="form-text small text-muted mb-3">可選擇點數或輸入其他獎勵內容。</div>
-
-          <div class="form-check form-switch mb-1">
-            <input class="form-check-input" type="checkbox" role="switch" id="chkParentPass">
-            <label class="form-check-label" for="chkParentPass">家長勾選：今日闖關成功</label>
-          </div>
-          <div id="parentPassNote" class="small text-muted mb-3"></div>
+          <div class="small text-muted mb-3">完成今日任務後會自動蓋章並收集貼紙。</div>
 
           <div class="d-flex gap-2">
             <button id="btnResetToday" class="btn btn-outline-danger">↺ 重置今日</button>
@@ -106,8 +101,8 @@
 
           <hr>
           <ul class="rule-list small mb-0">
-            <li>每天至少完成 <b>3 項任務</b> 後，請家長勾選「今日闖關成功」，即可結算當日獎勵。</li>
-            <li>闖關成功會在地圖上蓋章，並隨機抽一張小貓貼紙放入收藏。</li>
+            <li>完成 <b>當日任務</b> 後，系統會自動蓋章並收集貼紙。</li>
+            <li>闖關紀錄會依照 Google 表單資料自動更新並統計獎勵。</li>
             <li>每週一會自動建立新地圖（保留歷史週記錄，也可匯出備份）。</li>
           </ul>
         </div>
@@ -159,7 +154,7 @@
   </div>
 
     <footer class="text-center text-muted small mt-4">
-      由家長與孩子一起使用：完成任務 → 家長勾選闖關成功 → 收集小貓貼紙。
+      由家長與孩子一起使用：完成任務 → 系統自動判定闖關成功 → 收集小貓貼紙。
     </footer>
   </div>
 
@@ -223,6 +218,26 @@
     function markTaskSource(task, source){
       if(!task.source){ task.source = source; }
       return task;
+    }
+
+    function parseDoneFlag(value){
+      if(typeof value === 'boolean'){ return value; }
+      if(typeof value === 'number'){ return value !== 0; }
+      if(typeof value === 'string'){
+        const text = value.replace(/[\s\uFEFF]+$/u, '').trim();
+        if(!text){ return false; }
+        if(/^[✓✔✅]$/.test(text)){ return true; }
+        if(text === '是' || text === '已完成' || text === '完成'){ return true; }
+        if(text === '否' || text === '未完成'){ return false; }
+        const lowered = text.toLowerCase();
+        if(['true','1','y','yes','ok','done','完成'].includes(lowered)){ return true; }
+        if(['false','0','n','no','pending'].includes(lowered)){ return false; }
+      }
+      return false;
+    }
+
+    function formatDoneFlag(value){
+      return value ? '是' : '否';
     }
 
     function defaultTasks(){
@@ -341,15 +356,21 @@
       }
       task.reward = rewardFromApi(record.reward);
       ensureTaskReward(task);
+      const doneKeys = ['done','Done','DONE','完成 ','完成','已完成','isDone','status'];
+      const hasDoneField = doneKeys.some(key=>Object.prototype.hasOwnProperty.call(record, key));
+      const doneField = record.done ?? record.Done ?? record.DONE ?? record['完成 '] ?? record['完成'] ?? record['已完成'] ?? record['isDone'] ?? record['status'];
+      task.done = parseDoneFlag(doneField);
+      task._hasRemoteDone = hasDoneField;
       return task;
     }
 
-    function encodeTaskForApi({id, category, detail, reward}, date){
+    function encodeTaskForApi({id, category, detail, reward, done}, date){
       return {
         id: String(id),
         date,
         item: JSON.stringify({category, detail}),
-        reward: JSON.stringify(reward)
+        reward: JSON.stringify(reward),
+        done: formatDoneFlag(!!done)
       };
     }
 
@@ -370,6 +391,36 @@
         task.reward = {type:'points', value: safe};
       }
       return task.reward;
+    }
+
+    function refreshDayStatus(day, {silent=true}={}){
+      if(!day){
+        return {total:0, doneCount:0, completed:false};
+      }
+      ensureDayStructure(day);
+      const total = Array.isArray(day.tasks) ? day.tasks.length : 0;
+      let doneCount = 0;
+      if(Array.isArray(day.tasks)){
+        day.tasks.forEach(task=>{ if(task && task.done){ doneCount += 1; } });
+      }
+      const completed = total > 0 && doneCount > 0;
+      const prev = !!day.passed;
+      day.passed = completed;
+      if(completed){
+        if(!day.sticker){
+          day.sticker = catSet[Math.floor(Math.random()*catSet.length)];
+        }
+      }else if(day.sticker){
+        day.sticker = '';
+      }
+      if(!silent && completed !== prev){
+        if(completed){
+          toastMsg(`今日任務已完成！得到貼紙 ${day.sticker || '🐾'}`, 'success');
+        }else{
+          toastMsg('已取消今日闖關成功。', 'info');
+        }
+      }
+      return {total, doneCount, completed};
     }
 
     function getTaskRewardLabel(task){
@@ -496,7 +547,10 @@
         state.weekData = defaultData;
         saveJSON(key, state.weekData);
       }
-      state.weekData.days.forEach(ensureDayStructure);
+      state.weekData.days.forEach(day=>{
+        ensureDayStructure(day);
+        refreshDayStatus(day, {silent:true});
+      });
       render();
       syncWeekFromApi();
     }
@@ -531,9 +585,10 @@
           if(incoming.length){
             incoming.forEach(task=>{
               const prev = existingMap.get(String(task.id));
-              if(prev){ task.done = !!prev.done; }
+              if(prev && !task._hasRemoteDone){ task.done = !!prev.done; }
               ensureTaskReward(task);
               markTaskSource(task, 'api');
+              delete task._hasRemoteDone;
             });
             day.tasks = incoming;
           }else{
@@ -543,6 +598,7 @@
               day.tasks = defaultTasks();
             }
           }
+          refreshDayStatus(day, {silent:true});
         });
         saveJSON(state.weekKey, state.weekData);
         render();
@@ -567,8 +623,9 @@
       const todayIdx = dayIndexByDate(todayStr);
 
       state.weekData.days.forEach((d, i)=>{
+        const status = refreshDayStatus(d, {silent:true});
         const isToday = i===todayIdx;
-        const isDone = !!d.passed;
+        const isDone = !!status.completed;
         const col = document.createElement('div');
         const cp = document.createElement('div');
         cp.className = 'checkpoint d-flex flex-column text-center mx-auto ' + (isToday? 'today ':'') + (isDone? 'done ':'');
@@ -601,8 +658,9 @@
         return;
       }
       ensureDayStructure(day);
-      const totalCount = day.tasks.length;
-      let doneCount = 0;
+      const status = refreshDayStatus(day, {silent:true});
+      const totalCount = status.total;
+      const doneCount = status.doneCount;
       day.tasks.forEach(task=>{
         ensureTaskReward(task);
         const wrapper = document.createElement('div');
@@ -617,7 +675,6 @@
         checkbox.id = `task-${task.id}`;
         checkbox.dataset.taskId = task.id;
         checkbox.checked = !!task.done;
-        if(task.done) doneCount += 1;
 
         const label = document.createElement('label');
         label.className = 'form-check-label flex-grow-1';
@@ -649,19 +706,13 @@
         container.appendChild(wrapper);
       });
 
-      const parentCheck = document.getElementById('chkParentPass');
-      parentCheck.checked = !!day.passed;
-      const lock = doneCount < 3 && !day.passed;
-      parentCheck.disabled = lock;
-
       const counter = document.getElementById('taskCounter');
       if(counter){
-        counter.textContent = totalCount ? `已完成 ${doneCount} / ${totalCount} 項任務。` : '尚未加入任務。';
-      }
-
-      const note = document.getElementById('parentPassNote');
-      if(note){
-        note.textContent = lock ? '需完成至少 3 項任務後才能勾選闖關成功。' : '家長可勾選今日闖關成功，蓋章並取得貼紙。';
+        const completionMsg = status.completed ? '今日任務已完成，已自動蓋章！' : '完成任務後會自動蓋章並收集貼紙。';
+        const counterMsg = totalCount
+          ? `已完成 ${doneCount} / ${totalCount} 項任務。${completionMsg}`
+          : '尚未加入任務。';
+        counter.textContent = counterMsg;
       }
 
       updateRewardSummary();
@@ -673,8 +724,9 @@
       const task = day.tasks.find(t=>t.id===taskId);
       if(!task) return;
       task.done = !!value;
+      refreshDayStatus(day, {silent:false});
       saveJSON(state.weekKey, state.weekData);
-      renderTodayTasks();
+      render();
     }
 
     async function addTask(category, detail, reward){
@@ -690,8 +742,9 @@
         await apiAddRecord(payload);
         day.tasks = day.tasks.filter(t=>!(t.source === 'api' && String(t.id) === String(taskId)));
         day.tasks.push(task);
+        refreshDayStatus(day, {silent:true});
         saveJSON(state.weekKey, state.weekData);
-        renderTodayTasks();
+        render();
         toastMsg('已新增任務並同步雲端。', 'success');
       }catch(err){
         console.error(err);
@@ -717,8 +770,9 @@
       }
       day.tasks = day.tasks.filter(t=>String(t.id)!==String(taskId));
       if(day.tasks.length !== before){
+        refreshDayStatus(day, {silent:true});
         saveJSON(state.weekKey, state.weekData);
-        renderTodayTasks();
+        render();
         toastMsg('已刪除任務。', 'info');
       }
     }
@@ -728,6 +782,7 @@
       const day = state.weekData.days[idx];
       day.tasks = defaultTasks();
       day.passed = false; day.sticker='';
+      refreshDayStatus(day, {silent:true});
       saveJSON(state.weekKey, state.weekData);
       render();
       toastMsg('已重置今日進度。', 'info');
@@ -748,30 +803,6 @@
       render();
       syncWeekFromApi();
       toastMsg('已建立新地圖。', 'info');
-    }
-
-    function setParentPass(val){
-      const idx = dayIndexByDate(state.today);
-      const day = state.weekData.days[idx];
-      if(!day) return;
-      const checked = !!val;
-      if(checked){
-        if(!day.passed){
-          day.passed = true;
-          if(!day.sticker){
-            day.sticker = catSet[Math.floor(Math.random()*catSet.length)];
-          }
-          toastMsg(`闖關成功！得到貼紙 ${day.sticker} `, 'success');
-        }
-      }else{
-        if(day.passed){
-          day.passed = false;
-          day.sticker = '';
-          toastMsg('已取消今日闖關成功。', 'info');
-        }
-      }
-      saveJSON(state.weekKey, state.weekData);
-      render();
     }
 
     function clearAll(){
@@ -804,7 +835,12 @@
           if(!obj || !obj.weekStart || !Array.isArray(obj.days) || obj.days.length!==7){
             alert('格式不正確'); return;
           }
-          state.weekData = obj; state.weekData.days.forEach(ensureDayStructure); saveJSON(state.weekKey, state.weekData);
+          state.weekData = obj;
+          state.weekData.days.forEach(day=>{
+            ensureDayStructure(day);
+            refreshDayStatus(day, {silent:true});
+          });
+          saveJSON(state.weekKey, state.weekData);
           render();
           toastMsg('匯入完成。', 'success');
         }catch(err){ alert('無法解析檔案'); }
@@ -827,13 +863,17 @@
       return Array.isArray(data.data) ? data.data : [];
     }
 
-    async function apiAddRecord({id, date, item, reward}){
+    async function apiAddRecord({id, date, item, reward, done}){
       const body = new URLSearchParams();
       body.append('action', 'add');
       body.append('id', id);
       body.append('date', date);
       body.append('item', item);
       body.append('reward', reward);
+      const doneValue = typeof done === 'string' ? done : formatDoneFlag(!!done);
+      body.append('done', doneValue);
+      body.append('完成 ', doneValue);
+      body.append('完成', doneValue);
 
       const resp = await fetch(API_URL, {
         method: 'POST',
@@ -943,7 +983,6 @@
       }
       rewardTypeSelect.addEventListener('change', syncRewardInputs);
       syncRewardInputs();
-      document.getElementById('chkParentPass').addEventListener('change', (e)=>setParentPass(e.target.checked));
       document.getElementById('btnResetToday').addEventListener('click', resetToday);
       document.getElementById('btnNewWeek').addEventListener('click', newWeek);
       document.getElementById('btnClearAll').addEventListener('click', clearAll);
