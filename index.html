@@ -112,6 +112,12 @@
           </div>
           <div id="weekInfo" class="text-muted small mb-3"></div>
 
+          <div class="mb-3">
+            <label for="weekPicker" class="form-label small text-muted mb-1">選擇日期</label>
+            <input id="weekPicker" type="date" class="form-control form-control-sm" aria-describedby="weekPickerHelp" />
+            <div id="weekPickerHelp" class="form-text small text-muted">挑選任一日期即可切換至該週紀錄。</div>
+          </div>
+
           <div class="map-wrap position-relative">
             <div class="row row-cols-2 row-cols-sm-4 row-cols-md-7 g-3" id="mapRow"></div>
           </div>
@@ -218,8 +224,12 @@
     }
 
     // LocalStorage Key 以週一日期命名
-    function storageKey(prefix){
-      const ws = weekStart(new Date());
+    function storageKey(prefix, date){
+      let base = date instanceof Date ? new Date(date) : new Date(date || Date.now());
+      if(Number.isNaN(base.getTime())){
+        base = new Date();
+      }
+      const ws = weekStart(base);
       return `${prefix}:${fmtDate(ws)}`;
     }
 
@@ -233,8 +243,10 @@
     // === 狀態 ===
     const WEEK_DAYS = ["週一","週二","週三","週四","週五","週六","週日"];
 
+    const initialWeekStart = weekStart(new Date());
     const state = {
-      weekKey: storageKey('catmap'),
+      weekKey: storageKey('catmap', initialWeekStart),
+      currentWeekStart: fmtDate(initialWeekStart),
       weekData: null,
       today: todayYMD(),
       selectedDate: null,
@@ -314,6 +326,22 @@
 
     function defaultTasks(){
       return [];
+    }
+
+    function createDefaultWeekData(weekStartInput){
+      const base = weekStart(weekStartInput instanceof Date ? weekStartInput : new Date(weekStartInput || Date.now()));
+      const wsStr = fmtDate(base);
+      const days = Array.from({length:7}, (_,i)=>{
+        const dayDate = new Date(base);
+        dayDate.setDate(base.getDate()+i);
+        return {
+          date: fmtDate(dayDate),
+          tasks: defaultTasks(),
+          passed: false,
+          sticker: ''
+        };
+      });
+      return {weekStart: wsStr, days};
     }
 
     function generateApiId(){
@@ -479,7 +507,11 @@
       day.passed = completed;
       if(completed){
         if(!day.sticker){
-          day.sticker = catSet[Math.floor(Math.random()*catSet.length)];
+          if(Array.isArray(catEmojis) && catEmojis.length){
+            day.sticker = catEmojis[Math.floor(Math.random()*catEmojis.length)];
+          }else{
+            day.sticker = '🐾';
+          }
         }
       }else if(day.sticker){
         day.sticker = '';
@@ -603,36 +635,76 @@
       });
     }
 
-    function initWeek(){
-      const ws = weekStart(new Date());
-      const we = new Date(ws); we.setDate(we.getDate()+6);
-      const weekTitle = `${fmtDate(ws)} ~ ${fmtDate(we)}`;
-      document.getElementById('weekInfo').textContent = `本週：${weekTitle}`;
-
-      const key = state.weekKey;
-      const defaultData = {
-        weekStart: fmtDate(ws),
-        days: Array.from({length:7}, (_,i)=>({
-          date: fmtDate(new Date(ws.getFullYear(), ws.getMonth(), ws.getDate()+i)),
-          tasks: defaultTasks(),
-          passed: false,
-          sticker: ''
-        }))
-      };
-      state.weekData = loadJSON(key, defaultData);
-      // 若跨週，自動新建
-      if(state.weekData.weekStart !== fmtDate(ws)){
-        state.weekData = defaultData;
-        saveJSON(key, state.weekData);
+    function loadWeekForDate(dateStr, {sync=true}={}){
+      let baseDate = null;
+      if(dateStr instanceof Date && !Number.isNaN(dateStr.getTime())){
+        baseDate = new Date(dateStr);
+      }else{
+        const normalized = normalizeApiDate(dateStr || '');
+        if(normalized){
+          const parsed = new Date(normalized);
+          if(!Number.isNaN(parsed.getTime())){
+            baseDate = parsed;
+          }
+        }
       }
-      state.selectedDate = state.today;
-      state.weekData.days.forEach(day=>{
+      if(!baseDate){
+        baseDate = new Date();
+      }
+      baseDate.setHours(0,0,0,0);
+
+      const ws = weekStart(baseDate);
+      const wsStr = fmtDate(ws);
+      state.currentWeekStart = wsStr;
+      state.weekKey = storageKey('catmap', ws);
+
+      const fallbackWeek = createDefaultWeekData(ws);
+      const weekChanged = !state.weekData || state.weekData.weekStart !== wsStr;
+      if(weekChanged){
+        let weekData = loadJSON(state.weekKey, fallbackWeek);
+        if(!weekData || weekData.weekStart !== wsStr || !Array.isArray(weekData.days) || weekData.days.length !== 7){
+          weekData = fallbackWeek;
+        }
+        state.weekData = weekData;
+      }
+
+      if(!state.weekData){
+        state.weekData = fallbackWeek;
+      }
+      if(state.weekData.weekStart !== wsStr){
+        state.weekData.weekStart = wsStr;
+      }
+      if(!Array.isArray(state.weekData.days) || state.weekData.days.length !== 7){
+        state.weekData.days = fallbackWeek.days.slice();
+      }
+
+      state.weekData.days.forEach((day, idx)=>{
+        if(!day || typeof day !== 'object'){
+          state.weekData.days[idx] = fallbackWeek.days[idx];
+          day = state.weekData.days[idx];
+        }else if(!day.date){
+          day.date = fallbackWeek.days[idx].date;
+        }
         ensureDayStructure(day);
         refreshDayStatus(day, {silent:true});
       });
+
+      const normalizedSelected = fmtDate(baseDate);
+      const hasSelected = state.weekData.days.some(d=>d.date === normalizedSelected);
+      state.selectedDate = hasSelected ? normalizedSelected : (state.weekData.days[0]?.date || null);
+      state.loadingDate = null;
+      state.isLoadingDay = false;
       ensureSelectedDay();
       render();
-      syncWeekFromApi();
+      saveJSON(state.weekKey, state.weekData);
+      if(sync){
+        syncWeekFromApi();
+      }
+      return {weekChanged, selectedDate: state.selectedDate};
+    }
+
+    function initWeek(){
+      loadWeekForDate(state.today, {sync:true});
     }
 
     async function syncWeekFromApi(){
@@ -683,6 +755,7 @@
             refreshDayStatus(day, {silent:true});
           });
           saveJSON(state.weekKey, state.weekData);
+          state.currentWeekStart = state.weekData.weekStart;
           ensureSelectedDay();
           render();
           toastMsg('已從雲端載入本週任務。', 'success');
@@ -775,6 +848,27 @@
       if(!state.weekData || !Array.isArray(state.weekData.days)){
         return;
       }
+      const weekInfo = document.getElementById('weekInfo');
+      if(weekInfo){
+        const wsStr = state.weekData.weekStart;
+        if(wsStr){
+          const ws = new Date(wsStr);
+          if(!Number.isNaN(ws.getTime())){
+            const we = new Date(ws);
+            we.setDate(we.getDate()+6);
+            weekInfo.textContent = `本週：${fmtDate(ws)} ~ ${fmtDate(we)}`;
+          }else{
+            weekInfo.textContent = '';
+          }
+        }else{
+          weekInfo.textContent = '';
+        }
+      }
+      const weekPicker = document.getElementById('weekPicker');
+      if(weekPicker){
+        const pickerValue = state.selectedDate || state.weekData.days[0]?.date || '';
+        weekPicker.value = pickerValue || '';
+      }
       const mapRow = document.getElementById('mapRow');
       mapRow.innerHTML = '';
       const stickerRow = document.getElementById('stickerRow');
@@ -833,7 +927,7 @@
           }else{
             info.textContent = `${prefix}：${selectedDate}`;
           }
-          info.textContent += '｜點擊右側日期可切換。';
+          info.textContent += '｜點擊地圖或使用右側日期選擇器可切換。';
         }else{
           info.textContent = '尚無任務資料。';
         }
@@ -1113,6 +1207,22 @@
     // === 綁定 ===
     window.addEventListener('DOMContentLoaded', ()=>{
       initWeek();
+      const weekPickerInput = document.getElementById('weekPicker');
+      if(weekPickerInput){
+        weekPickerInput.addEventListener('change', (e)=>{
+          const normalized = normalizeApiDate(e.target.value || '');
+          if(!normalized){
+            return;
+          }
+          const selectedWeekStart = fmtDate(weekStart(new Date(normalized)));
+          const currentWeekStart = state.currentWeekStart || (state.weekData ? state.weekData.weekStart : null);
+          if(currentWeekStart === selectedWeekStart){
+            selectDay(normalized);
+          }else{
+            loadWeekForDate(normalized, {sync:true});
+          }
+        });
+      }
       document.getElementById('taskList').addEventListener('change', (e)=>{
         if(e.target.matches('input[type="checkbox"][data-task-id]')){
           const checkbox = e.target;
