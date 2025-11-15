@@ -18,7 +18,7 @@
     .card{border:none; border-radius:1rem; box-shadow:0 8px 24px rgba(0,0,0,.08);} 
     .map-wrap{background:linear-gradient(180deg, #fffaf0, #fff); border-radius:1rem; position:relative; padding:1.25rem}
     .checkpoint{width:72px; height:72px; border-radius:50%; background:#fff; border:3px dashed #e7d8c7; display:flex; align-items:center; justify-content:center; position:relative; transition:transform .2s; cursor:pointer;}
-    .checkpoint .day{position:absolute; top:-1.25rem; font-weight:700; font-size:.9rem}
+    .checkpoint .day{position:absolute; top:-1.25rem; font-weight:700; font-size:.9rem; color:var(--ink)}
     .checkpoint .cat{font-size:2rem; line-height:1}
     .checkpoint.today{border-style:solid; border-color:var(--accent); box-shadow:0 0 0 8px rgba(255,183,3,.15);}
     .checkpoint.done{background:var(--success); border-color:var(--success); color:#fff}
@@ -85,6 +85,10 @@
             <select id="rewardType" class="form-select">
               <option value="points">點數</option>
               <option value="custom">自訂</option>
+              <option value="preset:玩撲克牌一次">玩撲克牌一次</option>
+              <option value="preset:掌聲鼓勵">掌聲鼓勵</option>
+              <option value="preset:休息10分鐘">休息10分鐘</option>
+              <option value="preset:五隻貓">五隻貓</option>
             </select>
             <input id="rewardPoints" type="number" class="form-control" min="0" value="1" placeholder="輸入點數" />
             <input id="rewardCustom" type="text" class="form-control d-none" placeholder="輸入獎勵內容，例如：玩 10 分鐘 Switch" />
@@ -1252,17 +1256,23 @@
         const category = document.getElementById('taskCategory').value;
         const detailInput = document.getElementById('taskDetail');
         const detail = detailInput.value;
-        const rewardType = document.getElementById('rewardType').value;
+        const rewardTypeSelectEl = document.getElementById('rewardType');
+        const rewardType = rewardTypeSelectEl.value;
         const rewardPoints = document.getElementById('rewardPoints');
         const rewardCustom = document.getElementById('rewardCustom');
         if(!category && !detail.trim()) return;
         let reward;
         if(rewardType === 'custom'){
           reward = {type:'custom', value:(rewardCustom.value || '').trim()};
-        }else{
+        }else if(rewardType === 'points'){
           const num = Number(rewardPoints.value);
           const safe = Number.isFinite(num) ? Math.max(0, Math.round(num)) : 0;
           reward = {type:'points', value:safe};
+        }else if(rewardType.startsWith('preset:')){
+          const presetText = rewardType.slice('preset:'.length) || rewardTypeSelectEl.options[rewardTypeSelectEl.selectedIndex]?.text || '';
+          reward = {type:'custom', value:presetText};
+        }else{
+          reward = {type:'custom', value:(rewardCustom.value || '').trim()};
         }
         addTaskButton.disabled = true;
         try{
@@ -1288,13 +1298,17 @@
       const rewardPointsInput = document.getElementById('rewardPoints');
       const rewardCustomInput = document.getElementById('rewardCustom');
       function syncRewardInputs(){
-        if(rewardTypeSelect.value === 'custom'){
-          rewardPointsInput.classList.add('d-none');
-          rewardCustomInput.classList.remove('d-none');
+        const type = rewardTypeSelect.value;
+        const isCustom = type === 'custom';
+        const isPoints = type === 'points';
+        rewardPointsInput.classList.toggle('d-none', !isPoints);
+        rewardPointsInput.disabled = !isPoints;
+        rewardCustomInput.classList.toggle('d-none', !isCustom);
+        rewardCustomInput.disabled = !isCustom;
+        if(isCustom){
           rewardCustomInput.focus();
-        }else{
-          rewardPointsInput.classList.remove('d-none');
-          rewardCustomInput.classList.add('d-none');
+        }else if(isPoints){
+          rewardPointsInput.focus();
         }
       }
       rewardTypeSelect.addEventListener('change', syncRewardInputs);
