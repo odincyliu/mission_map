@@ -30,6 +30,7 @@
     .sticker{width:64px; height:64px; background:#fff; border:2px dashed #e7d8c7; border-radius:.75rem; display:flex; align-items:center; justify-content:center}
     .sticker.filled{border-color:var(--accent2); background:linear-gradient(180deg,#fff,#eef8ff)}
     .sticker .bigcat{font-size:1.8rem}
+    .sticker .sticker-img{max-width:100%; max-height:100%; object-fit:contain; border-radius:.5rem}
     .rule-list li{margin-bottom:.25rem}
     .task-check input[type="checkbox"]{transform:scale(1.2); margin-right:.4rem}
     .btn-cat{background:var(--accent); color:#000; border:none; font-weight:700}
@@ -169,7 +170,13 @@
 
   <script>
     // === 工具 ===
-    const catEmojis = ["🐈","🐈‍⬛","🐱","😺","😸","😹","😻","😼","😽","🙀","😿","😾","🐾"]; // 隨機貼紙
+    const PIXABAY_KEY = '53255076-4a6bbbbc5a9e8e792925f5a2e';
+    const PIXABAY_ENDPOINT = 'https://pixabay.com/api/';
+    const PIXABAY_QUERY = 'cat cartoon';
+    const FALLBACK_STICKERS = ['🐈','🐈‍⬛','🐱','😺','😸','😹','😻','😼','😽','🙀','😿','😾','🐾'];
+    const DEFAULT_STICKER_ALT = '卡通貓貼紙';
+    let catStickerImages = [];
+    let catStickerFetchPromise = null;
 
     // 取得當地時間（以使用者瀏覽器為準）
     function todayYMD(){
@@ -189,6 +196,172 @@
     }
     function fmtDate(d){
       return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+    }
+
+    function normalizeSticker(raw){
+      if(!raw){
+        return null;
+      }
+      if(typeof raw === 'string'){
+        const trimmed = raw.trim();
+        if(!trimmed){
+          return null;
+        }
+        if(/^https?:\/\//i.test(trimmed)){
+          return {type:'image', url: trimmed, alt: DEFAULT_STICKER_ALT};
+        }
+        return {type:'emoji', value: trimmed};
+      }
+      if(typeof raw === 'object'){
+        const type = raw.type;
+        if(type === 'image'){
+          const url = raw.url || raw.value || '';
+          if(url){
+            return {type:'image', url: String(url), alt: raw.alt ? String(raw.alt) : DEFAULT_STICKER_ALT};
+          }
+        }
+        if(type === 'emoji'){
+          const value = raw.value || raw.emoji || '';
+          if(value){
+            return {type:'emoji', value: String(value)};
+          }
+        }
+        if(raw.url){
+          return {type:'image', url: String(raw.url), alt: raw.alt ? String(raw.alt) : DEFAULT_STICKER_ALT};
+        }
+        if(raw.value){
+          const value = String(raw.value).trim();
+          if(!value){
+            return null;
+          }
+          if(/^https?:\/\//i.test(value)){
+            return {type:'image', url: value, alt: raw.alt ? String(raw.alt) : DEFAULT_STICKER_ALT};
+          }
+          return {type:'emoji', value};
+        }
+      }
+      return null;
+    }
+
+    function isStickerFilled(sticker){
+      if(!sticker){ return false; }
+      if(typeof sticker === 'object'){
+        if(sticker.type === 'image'){
+          return !!sticker.url;
+        }
+        if(sticker.type === 'emoji'){
+          return !!sticker.value;
+        }
+        return false;
+      }
+      if(typeof sticker === 'string'){
+        return sticker.trim().length > 0;
+      }
+      return false;
+    }
+
+    function getStickerTitle(sticker){
+      if(sticker && typeof sticker === 'object'){
+        if(sticker.type === 'image'){
+          const alt = sticker.alt || DEFAULT_STICKER_ALT;
+          const firstTag = alt.split(',')[0].trim();
+          return firstTag || DEFAULT_STICKER_ALT;
+        }
+        if(sticker.type === 'emoji'){
+          return sticker.value || DEFAULT_STICKER_ALT;
+        }
+      }
+      if(typeof sticker === 'string' && sticker.trim()){
+        return sticker.trim();
+      }
+      return DEFAULT_STICKER_ALT;
+    }
+
+    function createStickerContent(sticker){
+      if(sticker && typeof sticker === 'object'){
+        if(sticker.type === 'image' && sticker.url){
+          const img = document.createElement('img');
+          img.src = sticker.url;
+          img.alt = sticker.alt || DEFAULT_STICKER_ALT;
+          img.className = 'sticker-img';
+          return img;
+        }
+        if(sticker.type === 'emoji' && sticker.value){
+          const span = document.createElement('span');
+          span.className = 'bigcat';
+          span.textContent = sticker.value;
+          return span;
+        }
+      }
+      if(typeof sticker === 'string' && sticker.trim()){
+        const span = document.createElement('span');
+        span.className = 'bigcat';
+        span.textContent = sticker.trim();
+        return span;
+      }
+      const span = document.createElement('span');
+      span.className = 'bigcat';
+      span.textContent = '🔲';
+      return span;
+    }
+
+    function getRandomSticker(){
+      if(catStickerImages.length){
+        const item = catStickerImages[Math.floor(Math.random()*catStickerImages.length)];
+        if(item && item.url){
+          return {type:'image', url:item.url, alt:item.alt || DEFAULT_STICKER_ALT};
+        }
+      }
+      if(FALLBACK_STICKERS.length){
+        const emoji = FALLBACK_STICKERS[Math.floor(Math.random()*FALLBACK_STICKERS.length)];
+        return {type:'emoji', value: emoji};
+      }
+      return {type:'emoji', value:'🐾'};
+    }
+
+    async function fetchCatStickers(force=false){
+      if(!force && catStickerImages.length){
+        return catStickerImages;
+      }
+      if(catStickerFetchPromise){
+        return catStickerFetchPromise;
+      }
+      const url = `${PIXABAY_ENDPOINT}?key=${PIXABAY_KEY}&q=${encodeURIComponent(PIXABAY_QUERY)}&image_type=illustration&per_page=50&safesearch=true`;
+      catStickerFetchPromise = (async ()=>{
+        try{
+          const resp = await fetch(url);
+          if(!resp.ok){
+            throw new Error(`Pixabay API 回應錯誤: ${resp.status}`);
+          }
+          const data = await resp.json();
+          const hits = Array.isArray(data.hits) ? data.hits : [];
+          catStickerImages = hits
+            .map(hit=>{
+              if(!hit){ return null; }
+              const url = hit.webformatURL || hit.previewURL;
+              if(!url){ return null; }
+              const tags = typeof hit.tags === 'string' ? hit.tags : '';
+              return {url, alt: tags || DEFAULT_STICKER_ALT};
+            })
+            .filter(item=>item && item.url);
+          return catStickerImages;
+        }catch(err){
+          catStickerImages = [];
+          console.error('載入卡通貓貼紙失敗，將使用備用貼紙。', err);
+          throw err;
+        }finally{
+          catStickerFetchPromise = null;
+        }
+      })();
+      return catStickerFetchPromise;
+    }
+
+    async function preloadCatStickers(){
+      try{
+        await fetchCatStickers();
+      }catch(err){
+        // 若失敗則使用備用貼紙
+      }
     }
 
     function normalizeApiDate(raw){
@@ -342,7 +515,7 @@
           date: fmtDate(dayDate),
           tasks: defaultTasks(),
           passed: false,
-          sticker: ''
+          sticker: null
         };
       });
       return {weekStart: wsStr, days};
@@ -509,20 +682,17 @@
       const completed = total > 0 && doneCount === total;
       const prev = !!day.passed;
       day.passed = completed;
+      day.sticker = normalizeSticker(day.sticker);
       if(completed){
-        if(!day.sticker){
-          if(Array.isArray(catEmojis) && catEmojis.length){
-            day.sticker = catEmojis[Math.floor(Math.random()*catEmojis.length)];
-          }else{
-            day.sticker = '🐾';
-          }
+        if(!isStickerFilled(day.sticker)){
+          day.sticker = getRandomSticker();
         }
-      }else if(day.sticker){
-        day.sticker = '';
+      }else if(isStickerFilled(day.sticker)){
+        day.sticker = null;
       }
       if(!silent && completed !== prev){
         if(completed){
-          toastMsg(`今日任務已完成！得到貼紙 ${day.sticker || '🐾'}`, 'success');
+          toastMsg('今日任務已完成！得到卡通貓貼紙！', 'success');
         }else{
           toastMsg('已取消今日闖關成功。', 'info');
         }
@@ -631,7 +801,7 @@
         day.tasks = arr.length ? arr : defaultTasks();
       }
       if(typeof day.passed !== 'boolean'){ day.passed = !!day.passed; }
-      if(typeof day.sticker !== 'string'){ day.sticker = day.sticker ? String(day.sticker) : ''; }
+      day.sticker = normalizeSticker(day.sticker);
       day.tasks.forEach(task=>{
         ensureTaskReward(task);
         if(!task.id){ task.id = uid(); }
@@ -910,9 +1080,11 @@
 
         const sCol = document.createElement('div'); sCol.className='col-3 col-md-2 col-lg-1';
         const sticker = document.createElement('div');
-        sticker.className = 'sticker ' + (d.sticker? 'filled':'');
-        sticker.title = d.date;
-        sticker.innerHTML = `<span class="bigcat">${d.sticker || '🔲'}</span>`;
+        const hasSticker = isStickerFilled(d.sticker);
+        sticker.className = 'sticker ' + (hasSticker? 'filled':'');
+        sticker.title = hasSticker ? `${d.date}｜${getStickerTitle(d.sticker)}` : d.date;
+        sticker.innerHTML = '';
+        sticker.appendChild(createStickerContent(hasSticker ? d.sticker : null));
         sCol.appendChild(sticker); stickerRow.appendChild(sCol);
       });
 
@@ -1209,7 +1381,8 @@
     }
 
     // === 綁定 ===
-    window.addEventListener('DOMContentLoaded', ()=>{
+    window.addEventListener('DOMContentLoaded', async ()=>{
+      await preloadCatStickers();
       initWeek();
       const weekPickerInput = document.getElementById('weekPicker');
       if(weekPickerInput){
