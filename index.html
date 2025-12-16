@@ -159,25 +159,24 @@
     }
 
 function ensureCatSpriteStyles(){
-      //if(document.getElementById('catSpriteStyles')){
-        //return;
-      }//
-      const style = document.createElement('style');
-      style.id = 'catSpriteStyles';
+      // 1. 嘗試抓取已存在的 Style 標籤
+      let style = document.getElementById('catSpriteStyles');
+      
+      // 2. 如果不存在，才建立新的
+      if (!style) {
+        style = document.createElement('style');
+        style.id = 'catSpriteStyles';
+        document.head.appendChild(style);
+      }
 
       // ==========================================
-      // 🚀 關鍵設定：裁切黑框
+      // 🚀 關鍵設定：裁切黑框與放大
       // ==========================================
       
-      // 1. 縮放倍率 (Scale)
-      // 設定為 1.38 (放大 38%)
-      // 這個數值經過計算，剛好可以把原本圖上的「粗黑框」全部擠到視窗外面，
-      // 只留下中間白色的貓咪區域。
+      // 設定為 1.8 (放大 80% 以裁切掉邊框)
       const SCALE = 1.8; 
 
-      // 2. 垂直微調 (Nudge Y)
-      // 因為這張新圖非常工整，理論上不需要偏移。
-      // 如果覺得貓咪整體偏上或偏下，只要改這一個數字就好。
+      // 垂直微調 (如果貓咪上下不正，調整此數值)
       const NUDGE_Y = 0; 
 
       // ==========================================
@@ -185,38 +184,42 @@ function ensureCatSpriteStyles(){
       const cols = CAT_SPRITE_COLS;
       const rows = CAT_SPRITE_ROWS;
 
-      // --- 自動置中計算公式 (無需修改) ---
-      // 計算縮放後的分母
+      // --- 自動置中計算公式 ---
       const denomX = cols * SCALE - 1;
       const denomY = rows * SCALE - 1;
 
-      // 計算每一步的間距
       const stepX = denomX > 0 ? (SCALE / denomX) * 100 : 0;
       const stepY = denomY > 0 ? (SCALE / denomY) * 100 : 0;
 
-      // 計算起始偏移量 (讓放大的圖片保持在正中間)
       const offX = denomX > 0 ? (0.5 * (SCALE - 1) / denomX) * 100 : 0;
       const offY = denomY > 0 ? (0.5 * (SCALE - 1) / denomY) * 100 : 0;
 
-      // 背景圖總尺寸
       const bgWidth = `${cols * 100 * SCALE}%`;
       const bgHeight = `${rows * 100 * SCALE}%`;
 
-      let css = `.cat-sprite{width:100%;height:100%;background-image:url('${CAT_SPRITE_PATH}');background-size:${bgWidth} ${bgHeight};background-repeat:no-repeat;border-radius:.5rem;}`;
+      // 注意：這裡加上了 !important 以確保樣式強制生效
+      let css = `.cat-sprite {
+        width: 100%;
+        height: 100%;
+        background-image: url('${CAT_SPRITE_PATH}');
+        background-size: ${bgWidth} ${bgHeight} !important;
+        background-repeat: no-repeat;
+        border-radius: .5rem;
+      }`;
 
       for(let row=1; row<=rows; row++){
         for(let col=1; col<=cols; col++){
           const posX = offX + stepX * (col - 1);
-          // 這裡加上全域微調 NUDGE_Y
           const posY = offY + stepY * (row - 1) + NUDGE_Y;
           
-          css += `.cat-${row}-${col}{background-position:${posX}% ${posY}%;}`;
+          // 注意：background-position 也加上 !important
+          css += `.cat-${row}-${col} { background-position: ${posX}% ${posY}% !important; }`;
         }
       }
       
+      // 更新標籤內容
       style.textContent = css;
-      document.head.appendChild(style);
-}
+    }
 
     function spriteKey(row, col){
       return `${row}-${col}`;
