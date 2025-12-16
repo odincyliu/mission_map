@@ -164,8 +164,8 @@
       }
       const style = document.createElement('style');
       style.id = 'catSpriteStyles';
-      const stepX = 100 / Math.max(1, CAT_SPRITE_COLS - 1);
-      const stepY = 100 / Math.max(1, CAT_SPRITE_ROWS - 1);
+      const stepX = 100 / Math.max(1, CAT_SPRITE_COLS);
+      const stepY = 100 / Math.max(1, CAT_SPRITE_ROWS);
       let css = `.cat-sprite{width:100%;height:100%;background-image:url('${CAT_SPRITE_PATH}');background-size:${CAT_SPRITE_COLS*100}% ${CAT_SPRITE_ROWS*100}%;background-repeat:no-repeat;border-radius:.5rem;}`;
       for(let row=1; row<=CAT_SPRITE_ROWS; row++){
         for(let col=1; col<=CAT_SPRITE_COLS; col++){
