@@ -131,13 +131,12 @@
 
   <script>
     // === 工具 ===
-    const PIXABAY_KEY = '53255076-4a6bbbbc5a9e8e792925f5a2e';
-    const PIXABAY_ENDPOINT = 'https://pixabay.com/api/';
-    const PIXABAY_QUERY = 'cat cartoon';
-    const FALLBACK_STICKERS = ['🐈','🐈‍⬛','🐱','😺','😸','😹','😻','😼','😽','🙀','😿','😾','🐾'];
     const DEFAULT_STICKER_ALT = '卡通貓貼紙';
-    let catStickerImages = [];
-    let catStickerFetchPromise = null;
+    const CAT_SPRITE_ROWS = 10;
+    const CAT_SPRITE_COLS = 10;
+    const CAT_SPRITE_PATH = './assets/Gemini_Generated_Image_5udqzj5udqzj5udq.png';
+    const STICKER_HISTORY_KEY = 'catmap:spriteHistory';
+    const STICKER_UNIQUE_DAYS = 30;
 
     // 取得當地時間（以使用者瀏覽器為準）
     function todayYMD(){
@@ -159,14 +158,112 @@
       return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
     }
 
+    function ensureCatSpriteStyles(){
+      if(document.getElementById('catSpriteStyles')){
+        return;
+      }
+      const style = document.createElement('style');
+      style.id = 'catSpriteStyles';
+      const stepX = 100 / Math.max(1, CAT_SPRITE_COLS - 1);
+      const stepY = 100 / Math.max(1, CAT_SPRITE_ROWS - 1);
+      let css = `.cat-sprite{width:100%;height:100%;background-image:url('${CAT_SPRITE_PATH}');background-size:${CAT_SPRITE_COLS*100}% ${CAT_SPRITE_ROWS*100}%;background-repeat:no-repeat;border-radius:.5rem;}`;
+      for(let row=1; row<=CAT_SPRITE_ROWS; row++){
+        for(let col=1; col<=CAT_SPRITE_COLS; col++){
+          const posX = -stepX * (col - 1);
+          const posY = -stepY * (row - 1);
+          css += `.cat-${row}-${col}{background-position:${posX}% ${posY}%;}`;
+        }
+      }
+      style.textContent = css;
+      document.head.appendChild(style);
+    }
+
+    function spriteKey(row, col){
+      return `${row}-${col}`;
+    }
+
+    function normalizeSpriteCoords(row, col){
+      const r = Number(row);
+      const c = Number(col);
+      if(Number.isInteger(r) && Number.isInteger(c) && r>=1 && r<=CAT_SPRITE_ROWS && c>=1 && c<=CAT_SPRITE_COLS){
+        return {row:r, col:c, key:spriteKey(r, c)};
+      }
+      return null;
+    }
+
+    function parseSpriteKey(key){
+      if(typeof key !== 'string') return null;
+      const match = key.trim().match(/^(\d+)-(\d+)$/);
+      if(!match) return null;
+      return normalizeSpriteCoords(Number(match[1]), Number(match[2]));
+    }
+
+    function loadSpriteHistory(){
+      const data = loadJSON(STICKER_HISTORY_KEY, []);
+      return Array.isArray(data) ? data : [];
+    }
+
+    function pruneSpriteHistory(history){
+      const cutoff = new Date();
+      cutoff.setDate(cutoff.getDate() - STICKER_UNIQUE_DAYS);
+      const cutoffStr = fmtDate(cutoff);
+      const trimmed = (Array.isArray(history) ? history : []).filter(entry=>{
+        return entry && entry.key && entry.date && String(entry.date) >= cutoffStr;
+      });
+      saveJSON(STICKER_HISTORY_KEY, trimmed);
+      return trimmed;
+    }
+
+    function getAllSpriteKeys(){
+      const keys = [];
+      for(let r=1; r<=CAT_SPRITE_ROWS; r++){
+        for(let c=1; c<=CAT_SPRITE_COLS; c++){
+          keys.push(spriteKey(r,c));
+        }
+      }
+      return keys;
+    }
+
+    function rememberSpriteUsage(key, dateStr){
+      const history = pruneSpriteHistory(loadSpriteHistory());
+      const record = {key, date: dateStr || todayYMD()};
+      history.push(record);
+      saveJSON(STICKER_HISTORY_KEY, history);
+    }
+
+    function getUniqueCatSticker(dateStr){
+      ensureCatSpriteStyles();
+      const history = pruneSpriteHistory(loadSpriteHistory());
+      const used = new Set(history.map(item=>item && item.key).filter(Boolean));
+      const allKeys = getAllSpriteKeys();
+      const available = allKeys.filter(k=>!used.has(k));
+      const pickList = available.length ? available : allKeys;
+      const chosenKey = pickList[Math.floor(Math.random()*pickList.length)];
+      const coords = parseSpriteKey(chosenKey);
+      if(coords){
+        rememberSpriteUsage(coords.key, dateStr);
+        return {type:'sprite', row: coords.row, col: coords.col, key: coords.key};
+      }
+      return {type:'emoji', value:'🐾'};
+    }
+
     function normalizeSticker(raw){
       if(!raw){
         return null;
       }
+      const spriteFromCoords = (row,col)=>{
+        const coords = normalizeSpriteCoords(row, col);
+        if(!coords){ return null; }
+        return {type:'sprite', row: coords.row, col: coords.col, key: coords.key};
+      };
       if(typeof raw === 'string'){
         const trimmed = raw.trim();
         if(!trimmed){
           return null;
+        }
+        const spriteMatch = trimmed.match(/^cat-(\d+)-(\d+)$/i);
+        if(spriteMatch){
+          return spriteFromCoords(Number(spriteMatch[1]), Number(spriteMatch[2]));
         }
         if(/^https?:\/\//i.test(trimmed)){
           return {type:'image', url: trimmed, alt: DEFAULT_STICKER_ALT};
@@ -174,6 +271,14 @@
         return {type:'emoji', value: trimmed};
       }
       if(typeof raw === 'object'){
+        if(raw.type === 'sprite'){
+          const coords = spriteFromCoords(raw.row ?? raw.r ?? raw.x, raw.col ?? raw.c ?? raw.y);
+          if(coords){ return coords; }
+          if(raw.key){
+            const parsed = parseSpriteKey(raw.key);
+            if(parsed){ return {type:'sprite', row: parsed.row, col: parsed.col, key: parsed.key}; }
+          }
+        }
         const type = raw.type;
         if(type === 'image'){
           const url = raw.url || raw.value || '';
@@ -207,6 +312,10 @@
     function isStickerFilled(sticker){
       if(!sticker){ return false; }
       if(typeof sticker === 'object'){
+        if(sticker.type === 'sprite'){
+          const coords = normalizeSpriteCoords(sticker.row, sticker.col);
+          return !!coords;
+        }
         if(sticker.type === 'image'){
           return !!sticker.url;
         }
@@ -223,6 +332,13 @@
 
     function getStickerTitle(sticker){
       if(sticker && typeof sticker === 'object'){
+        if(sticker.type === 'sprite'){
+          const coords = normalizeSpriteCoords(sticker.row, sticker.col);
+          if(coords){
+            return `貓咪貼紙 ${coords.row}-${coords.col}`;
+          }
+          return DEFAULT_STICKER_ALT;
+        }
         if(sticker.type === 'image'){
           const alt = sticker.alt || DEFAULT_STICKER_ALT;
           const firstTag = alt.split(',')[0].trim();
@@ -240,6 +356,17 @@
 
     function createStickerContent(sticker){
       if(sticker && typeof sticker === 'object'){
+        if(sticker.type === 'sprite' && (sticker.row || sticker.col)){
+          const coords = normalizeSpriteCoords(sticker.row, sticker.col);
+          if(coords){
+            ensureCatSpriteStyles();
+            const div = document.createElement('div');
+            div.className = `cat-sprite cat-${coords.row}-${coords.col}`;
+            div.role = 'img';
+            div.setAttribute('aria-label', getStickerTitle(sticker));
+            return div;
+          }
+        }
         if(sticker.type === 'image' && sticker.url){
           const img = document.createElement('img');
           img.src = sticker.url;
@@ -264,65 +391,6 @@
       span.className = 'bigcat';
       span.textContent = '🔲';
       return span;
-    }
-
-    function getRandomSticker(){
-      if(catStickerImages.length){
-        const item = catStickerImages[Math.floor(Math.random()*catStickerImages.length)];
-        if(item && item.url){
-          return {type:'image', url:item.url, alt:item.alt || DEFAULT_STICKER_ALT};
-        }
-      }
-      if(FALLBACK_STICKERS.length){
-        const emoji = FALLBACK_STICKERS[Math.floor(Math.random()*FALLBACK_STICKERS.length)];
-        return {type:'emoji', value: emoji};
-      }
-      return {type:'emoji', value:'🐾'};
-    }
-
-    async function fetchCatStickers(force=false){
-      if(!force && catStickerImages.length){
-        return catStickerImages;
-      }
-      if(catStickerFetchPromise){
-        return catStickerFetchPromise;
-      }
-      const url = `${PIXABAY_ENDPOINT}?key=${PIXABAY_KEY}&q=${encodeURIComponent(PIXABAY_QUERY)}&image_type=illustration&per_page=50&safesearch=true`;
-      catStickerFetchPromise = (async ()=>{
-        try{
-          const resp = await fetch(url);
-          if(!resp.ok){
-            throw new Error(`Pixabay API 回應錯誤: ${resp.status}`);
-          }
-          const data = await resp.json();
-          const hits = Array.isArray(data.hits) ? data.hits : [];
-          catStickerImages = hits
-            .map(hit=>{
-              if(!hit){ return null; }
-              const url = hit.webformatURL || hit.previewURL;
-              if(!url){ return null; }
-              const tags = typeof hit.tags === 'string' ? hit.tags : '';
-              return {url, alt: tags || DEFAULT_STICKER_ALT};
-            })
-            .filter(item=>item && item.url);
-          return catStickerImages;
-        }catch(err){
-          catStickerImages = [];
-          console.error('載入卡通貓貼紙失敗，將使用備用貼紙。', err);
-          throw err;
-        }finally{
-          catStickerFetchPromise = null;
-        }
-      })();
-      return catStickerFetchPromise;
-    }
-
-    async function preloadCatStickers(){
-      try{
-        await fetchCatStickers();
-      }catch(err){
-        // 若失敗則使用備用貼紙
-      }
     }
 
     function normalizeApiDate(raw){
@@ -646,7 +714,7 @@
       day.sticker = normalizeSticker(day.sticker);
       if(completed){
         if(!isStickerFilled(day.sticker)){
-          day.sticker = getRandomSticker();
+          day.sticker = getUniqueCatSticker(day.date);
         }
       }else if(isStickerFilled(day.sticker)){
         day.sticker = null;
@@ -1343,7 +1411,7 @@
 
     // === 綁定 ===
     window.addEventListener('DOMContentLoaded', async ()=>{
-      await preloadCatStickers();
+      ensureCatSpriteStyles();
       initWeek();
       const weekPickerInput = document.getElementById('weekPicker');
       if(weekPickerInput){
