@@ -159,9 +159,9 @@
     }
 
 function ensureCatSpriteStyles(){
-      if(document.getElementById('catSpriteStyles')){
-        return;
-      }
+      //if(document.getElementById('catSpriteStyles')){
+        //return;
+      }//
       const style = document.createElement('style');
       style.id = 'catSpriteStyles';
 
@@ -173,7 +173,7 @@ function ensureCatSpriteStyles(){
       // 設定為 1.38 (放大 38%)
       // 這個數值經過計算，剛好可以把原本圖上的「粗黑框」全部擠到視窗外面，
       // 只留下中間白色的貓咪區域。
-      const SCALE = 1.6; 
+      const SCALE = 1.8; 
 
       // 2. 垂直微調 (Nudge Y)
       // 因為這張新圖非常工整，理論上不需要偏移。
