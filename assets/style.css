@@ -1,6 +1,6 @@
 :root{
   --bg:#fffdf7; --ink:#222; --soft:#f7efe3; --accent:#ffb703; --accent2:#8ecae6; --success:#76c893;
-  --cat-tile-size:96px;
+  --cat-tile-size:clamp(72px, 18vw, 96px);
 }
 body{font-family:'Noto Sans TC', system-ui, -apple-system, Segoe UI, Roboto, 'Helvetica Neue', Arial; background:var(--bg); color:var(--ink);}
 .app-title{font-weight:900; letter-spacing:1px}
