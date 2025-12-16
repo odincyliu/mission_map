@@ -17,7 +17,21 @@ body{font-family:'Noto Sans TC', system-ui, -apple-system, Segoe UI, Roboto, 'He
 .checkpoint:hover{transform:translateY(-2px)}
 .path{position:absolute; left:0; top:0; right:0; bottom:0; pointer-events:none}
 .paw{font-size:1.2rem; opacity:.28}
-.sticker{width:var(--cat-tile-size); height:var(--cat-tile-size); background:#fff; border:2px dashed #e7d8c7; border-radius:.75rem; display:flex; align-items:center; justify-content:center; aspect-ratio:1 / 1;}
+.sticker {
+  width: 100%;                   /* 改為：佔滿所在的格子寬度 */
+  max-width: var(--cat-tile-size); /* 新增：但不要超過原本設計的大小 */
+  aspect-ratio: 1 / 1;           /* 新增：自動保持正方形比例 (取代固定的 height) */
+  margin: 0 auto;                /* 新增：若格子很大，讓貼紙置中 */
+  
+  /* 以下保持原本樣式不變 */
+  background: #fff;
+  border: 2px dashed #e7d8c7;
+  border-radius: .75rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* aspect-ratio: 1 / 1;  <-- 如果原本下方有這行，可以保留或合併到上面 */
+}
 .sticker.filled{border-color:var(--accent2); background:linear-gradient(180deg,#fff,#eef8ff)}
 .sticker .bigcat{font-size:1.8rem}
 .sticker .sticker-img{max-width:100%; max-height:100%; object-fit:contain; border-radius:.5rem}
