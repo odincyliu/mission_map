@@ -166,31 +166,31 @@ function ensureCatSpriteStyles(){
       style.id = 'catSpriteStyles';
 
       // ==========================================
-      // 🔧 關鍵修正：縮放係數 (Scale Factor)
-      // 1.25 代表放大 25%。
-      // 原理：放大後，格子邊緣原本會「穿幫」的部分（別人的腳）會被擠出視窗外。
-      // 如果覺得貓咪被切掉太多，可以試著改為 1.15 或 1.2
+      // ⚡️ 強力修正參數設定
       // ==========================================
-      const SCALE = 1.25; 
+      
+      // 1. 放大倍率：改為 1.4 (放大 40%)
+      // 這樣可以把四周 20% 的邊緣都切掉，確保不會看到隔壁的腳。
+      const SCALE = 1.4; 
+
+      // 2. 垂直微調：往下移動鏡頭 (單位：百分比)
+      // 因為問題都是「看到上面的腳」，所以我們把視窗往下推一點點。
+      // 如果還是看到腳，可以試著把 0.8 改成 1.0 或 1.2
+      const NUDGE_Y = 0.8; 
 
       const cols = CAT_SPRITE_COLS;
       const rows = CAT_SPRITE_ROWS;
 
-      // 計算經過縮放後的「分母」
-      // 這是為了確保放大後，圖片依然能夠準確對齊中心點
+      // 計算經過縮放後的參數
       const denomX = cols * SCALE - 1;
       const denomY = rows * SCALE - 1;
 
-      // 計算每一步的百分比 (Step)
       const stepX = denomX > 0 ? (SCALE / denomX) * 100 : 0;
       const stepY = denomY > 0 ? (SCALE / denomY) * 100 : 0;
 
-      // 計算起始偏移量 (Offset)
-      // 用來修正放大後造成的中心點偏移
       const offX = denomX > 0 ? (0.5 * (SCALE - 1) / denomX) * 100 : 0;
       const offY = denomY > 0 ? (0.5 * (SCALE - 1) / denomY) * 100 : 0;
 
-      // 背景圖尺寸也要乘上縮放倍率
       const bgWidth = `${cols * 100 * SCALE}%`;
       const bgHeight = `${rows * 100 * SCALE}%`;
 
@@ -198,16 +198,17 @@ function ensureCatSpriteStyles(){
 
       for(let row=1; row<=rows; row++){
         for(let col=1; col<=cols; col++){
-          // 公式：偏移量 + (索引 * 步長)
+          // 在計算 Y 軸位置時，加入 NUDGE_Y 偏移量
           const posX = offX + stepX * (col - 1);
-          const posY = offY + stepY * (row - 1);
+          const posY = offY + stepY * (row - 1) + NUDGE_Y; 
+          
           css += `.cat-${row}-${col}{background-position:${posX}% ${posY}%;}`;
         }
       }
       
       style.textContent = css;
       document.head.appendChild(style);
-}
+    }
 
     function spriteKey(row, col){
       return `${row}-${col}`;
