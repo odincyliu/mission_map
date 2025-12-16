@@ -159,17 +159,29 @@
     }
 
     function ensureCatSpriteStyles(){
+      // 如果已經建立過樣式，就不要重複建立
       if(document.getElementById('catSpriteStyles')){
         return;
       }
       const style = document.createElement('style');
       style.id = 'catSpriteStyles';
+
+      // --- 修正後的關鍵計算 ---
+      // 說明：CSS background-position 的百分比是根據「剩餘空間」計算的。
+      // 所以如果有 10 格，要移動到最後一格 (100%)，只需要移動 9 個間隔。
+      // 因此分母必須是 (總數 - 1)。
       const stepX = CAT_SPRITE_COLS > 1 ? 100 / (CAT_SPRITE_COLS - 1) : 0;
       const stepY = CAT_SPRITE_ROWS > 1 ? 100 / (CAT_SPRITE_ROWS - 1) : 0;
-      
+      // ---------------------
+
+      // 設定背景圖總大小：10欄就是 1000%，10列就是 1000%
       const bgWidth = `${CAT_SPRITE_COLS * 100}%`;
       const bgHeight = `${CAT_SPRITE_ROWS * 100}%`;
+
+      // 設定共用樣式
       let css = `.cat-sprite{width:100%;height:100%;background-image:url('${CAT_SPRITE_PATH}');background-size:${bgWidth} ${bgHeight};background-repeat:no-repeat;border-radius:.5rem;}`;
+
+      // 迴圈產生每一張貼紙的座標
       for(let row=1; row<=CAT_SPRITE_ROWS; row++){
         for(let col=1; col<=CAT_SPRITE_COLS; col++){
           const posX = stepX * (col - 1);
@@ -177,6 +189,7 @@
           css += `.cat-${row}-${col}{background-position:${posX}% ${posY}%;}`;
         }
       }
+      
       style.textContent = css;
       document.head.appendChild(style);
     }
